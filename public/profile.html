@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile - Newszoid</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="navigation-style.css">
+    <style>
+        .profile-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            padding-top: calc(var(--header-height) + 40px);
+        }
+
+        .profile-header {
+            background: var(--secondary-bg);
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px var(--shadow-light);
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .profile-avatar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--location-color), var(--competition-color));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            font-weight: bold;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .profile-info h1 {
+            margin: 0 0 10px 0;
+            font-size: 32px;
+            color: var(--text-primary);
+        }
+
+        .profile-email {
+            color: var(--text-secondary);
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+
+        .profile-stats {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            display: block;
+            font-size: 28px;
+            font-weight: bold;
+            color: var(--competition-color);
+        }
+
+        .stat-label {
+            display: block;
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-top: 5px;
+        }
+
+        .profile-section {
+            background: var(--secondary-bg);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px var(--shadow-light);
+        }
+
+        .section-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .saved-articles-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .article-card {
+            background: var(--primary-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+
+        .article-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 20px var(--shadow-medium);
+        }
+
+        .article-card img {
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+        }
+
+        .article-card-content {
+            padding: 15px;
+        }
+
+        .article-card-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .article-card-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .reading-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, rgba(52, 152, 219, 0.1), rgba(52, 152, 219, 0.05));
+            border-left: 4px solid var(--competition-color);
+            padding: 20px;
+            border-radius: 12px;
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-card-value {
+            font-size: 36px;
+            font-weight: bold;
+            color: var(--competition-color);
+        }
+
+        .category-chart {
+            margin-top: 20px;
+        }
+
+        .category-bar {
+            margin-bottom: 15px;
+        }
+
+        .category-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .category-progress {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .category-progress-fill {
+            height: 100%;
+            background: var(--competition-color);
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            font-size: 20px;
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        .action-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            background: var(--competition-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .profile-header {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .profile-stats {
+                justify-content: center;
+            }
+
+            .saved-articles-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Header (reuse from main page) -->
+    <header class="header">
+        <div class="header-left">
+            <a href="/" class="logo">
+                <img src="https://via.placeholder.com/150x50/000000/FFFFFF?text=Newszoid" alt="Newszoid"
+                    class="logo-full">
+            </a>
+        </div>
+        <div class="header-right">
+            <a href="/" class="header-btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                    <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                </svg>
+                <span>Home</span>
+            </a>
+        </div>
+    </header>
+
+    <div class="profile-container">
+        <!-- Profile Header -->
+        <div class="profile-header">
+            <div class="profile-avatar" id="profileAvatar">U</div>
+            <div class="profile-info">
+                <h1 id="profileName">Loading...</h1>
+                <div class="profile-email" id="profileEmail"></div>
+                <div class="profile-stats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="savedCount">0</span>
+                        <span class="stat-label">Saved Articles</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="articlesRead">0</span>
+                        <span class="stat-label">Articles Read</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-value" id="totalTime">0</span>
+                        <span class="stat-label">Minutes Reading</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Saved Articles -->
+        <div class="profile-section">
+            <div class="section-title">
+                <span>📚 Saved Articles</span>
+                <button class="action-btn" id="clearSavedBtn" style="display: none;">
+                    Clear All
+                </button>
+            </div>
+            <div id="savedArticlesContainer" class="saved-articles-grid"></div>
+        </div>
+
+        <!-- Reading Statistics -->
+        <div class="profile-section">
+            <div class="section-title">
+                <span>📊 Reading Statistics</span>
+            </div>
+            <div class="reading-stats-grid">
+                <div class="stat-card">
+                    <h3>This Week</h3>
+                    <div class="stat-card-value" id="weeklyReads">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>This Month</h3>
+                    <div class="stat-card-value" id="monthlyReads">0</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Longest Streak</h3>
+                    <div class="stat-card-value" id="longestStreak">0 days</div>
+                </div>
+            </div>
+
+            <div class="category-chart" id="categoryChart">
+                <h3 style="margin-bottom: 20px; color: var(--text-primary);">Reading by Category</h3>
+            </div>
+        </div>
+    </div>
+
+    <script src="auth-client.js"></script>
+    <script src="bookmark.js"></script>
+    <script>
+        // Profile Page Script
+        class ProfileManager {
+            constructor() {
+                this.init();
+            }
+
+            async init() {
+                // Check if logged in
+                if (!authManager || !authManager.isLoggedIn()) {
+                    window.location.href = '/';
+                    return;
+                }
+
+                this.loadProfileData();
+                this.loadSavedArticles();
+                this.loadReadingStats();
+                this.setupEventListeners();
+            }
+
+            loadProfileData() {
+                const user = authManager.getUser();
+                if (!user) return;
+
+                document.getElementById('profileName').textContent = user.name;
+                document.getElementById('profileEmail').textContent = user.email || '';
+                document.getElementById('profileAvatar').textContent = user.name[0].toUpperCase();
+            }
+
+            loadSavedArticles() {
+                const bookmarks = bookmarkManager.getAll();
+                const container = document.getElementById('savedArticlesContainer');
+
+                document.getElementById('savedCount').textContent = bookmarks.length;
+
+                if (bookmarks.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📖</div>
+                            <h3>No saved articles yet</h3>
+                            <p>Start saving articles to read them later!</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                document.getElementById('clearSavedBtn').style.display = 'block';
+
+                container.innerHTML = bookmarks.map(bookmark => `
+                    <div class="article-card" data-bookmark-id="${bookmark.id}">
+                        ${bookmark.image ? `
+                            <img src="${bookmark.image}" 
+                                 alt="${this.escapeHTML(bookmark.title)}"
+                                 onerror="this.style.display='none'">
+                        ` : ''}
+                        <div class="article-card-content">
+                            <h3 class="article-card-title">${this.escapeHTML(bookmark.title)}</h3>
+                            <div class="article-card-meta">
+                                <span>${bookmark.source}</span>
+                                <span>${this.formatDate(bookmark.savedAt)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                // Add click handlers
+                container.querySelectorAll('.article-card').forEach(card => {
+                    card.addEventListener('click', () => {
+                        const bookmark = bookmarks.find(b => b.id === card.dataset.bookmarkId);
+                        if (bookmark && bookmark.url) {
+                            window.open(bookmark.url, '_blank');
+                        }
+                    });
+                });
+            }
+
+            loadReadingStats() {
+                try {
+                    const history = JSON.parse(localStorage.getItem('newszoid_reading_history') || '[]');
+                    const timeSpent = JSON.parse(localStorage.getItem('newszoid_time_spent') || '{}');
+
+                    // Calculate stats
+                    const totalArticles = history.length;
+                    const totalMinutes = Math.floor(Object.values(timeSpent).reduce((a, b) => a + b, 0) / 60);
+
+                    document.getElementById('articlesRead').textContent = totalArticles;
+                    document.getElementById('totalTime').textContent = totalMinutes;
+
+                    // Weekly/Monthly stats
+                    const now = Date.now();
+                    const oneWeek = 7 * 24 * 60 * 60 * 1000;
+                    const oneMonth = 30 * 24 * 60 * 60 * 1000;
+
+                    const weeklyCount = history.filter(h => (now - h.time) < oneWeek).length;
+                    const monthlyCount = history.filter(h => (now - h.time) < oneMonth).length;
+
+                    document.getElementById('weeklyReads').textContent = weeklyCount;
+                    document.getElementById('monthlyReads').textContent = monthlyCount;
+
+                    // Category chart
+                    this.renderCategoryChart(timeSpent);
+
+                } catch (error) {
+                    console.error('Failed to load stats:', error);
+                }
+            }
+
+            renderCategoryChart(timeSpent) {
+                const chartContainer = document.getElementById('categoryChart');
+                if (!chartContainer) return;
+
+                const categories = Object.entries(timeSpent)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 5);
+
+                if (categories.length === 0) {
+                    chartContainer.innerHTML += '<p>No reading data yet</p>';
+                    return;
+                }
+
+                const maxTime = Math.max(...categories.map(c => c[1]));
+
+                categories.forEach(([category, time]) => {
+                    const percentage = (time / maxTime) * 100;
+                    const minutes = Math.floor(time / 60);
+
+                    const bar = document.createElement('div');
+                    bar.className = 'category-bar';
+                    bar.innerHTML = `
+                        <div class="category-label">
+                            <span>${category}</span>
+                            <span>${minutes} min</span>
+                        </div>
+                        <div class="category-progress">
+                            <div class="category-progress-fill" style="width: ${percentage}%"></div>
+                        </div>
+                    `;
+                    chartContainer.appendChild(bar);
+                });
+            }
+
+            setupEventListeners() {
+                const clearBtn = document.getElementById('clearSavedBtn');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => {
+                        if (confirm('Are you sure you want to clear all saved articles?')) {
+                            localStorage.removeItem('newszoid_bookmarks_v2');
+                            window.location.reload();
+                        }
+                    });
+                }
+            }
+
+            escapeHTML(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            formatDate(timestamp) {
+                const date = new Date(timestamp);
+                return date.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric'
+                });
+            }
+        }
+
+        // Initialize when auth is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(() => new ProfileManager(), 500);
+            });
+        } else {
+            setTimeout(() => new ProfileManager(), 500);
+        }
+    </script>
+</body>
+
+</html>
