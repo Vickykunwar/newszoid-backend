@@ -12,7 +12,9 @@
   // ============================================================
   const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   const isBackendServing = window.location.port === '4000';
-  const API_BASE = (isDev && !isBackendServing) ? 'http://localhost:4000/api' : '/api';
+  const API_BASE = 'https://newszoid-backend-production.up.railway.app/api';
+  window.API_BASE = API_BASE;
+
 
   // Category mapping (aligned with backend)
   const CATEGORY_MAP = {
@@ -89,12 +91,6 @@
     async getLocalNews(location) {
       return this.fetchWithCache(
         `${this.baseURL}/news/local?location=${encodeURIComponent(location)}`
-      );
-    }
-
-    async getWeather(lat, lon) {
-      return this.fetchWithCache(
-        `${this.baseURL}/weather?lat=${lat}&lon=${lon}`
       );
     }
   }
@@ -461,8 +457,9 @@
 
     try {
       const city = AppState.location.city || 'Delhi';
-      const response = await fetch(`${API_BASE}/weather?city=${encodeURIComponent(city)}`);
-      const data = await response.json();
+      const data = await newsAPI.fetchWithCache(
+        `${API_BASE}/weather?city=${encodeURIComponent(city)}`
+      );
 
       if (!data.ok) throw new Error(data.error || 'Failed to fetch weather');
 

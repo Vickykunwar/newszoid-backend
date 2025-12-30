@@ -1,396 +1,404 @@
-// =============================================================
-// BOOKMARK / SAVED ARTICLES
-// =============================================================
+// ============================================================
+// ENHANCED BOOKMARK SYSTEM WITH BACKEND SYNC
+// Replace your bookmark.js with this improved version
+// ============================================================
 
-/**
- * Storage key
- */
-const BOOKMARK_KEY = 'newszoid_bookmarks_v1';
-
-/**
- * Return array of saved bookmarks
- */
-function getBookmarks() {
-  try {
-    return JSON.parse(localStorage.getItem(BOOKMARK_KEY) || '[]');
-  } catch (e) {
-    console.warn('Failed to parse bookmarks', e);
-    return [];
-  }
-}
-
-/**
- * Save bookmarks array to localStorage and update UI
- * @param {Array} arr - Array of bookmarks to save
- */
-function setBookmarks(arr) {
-  try {
-    if (!Array.isArray(arr)) {
-      console.error('setBookmarks: Expected an array, got:', typeof arr);
-      return false;
+class BookmarkManager {
+    constructor() {
+        this.storageKey = 'newszoid_bookmarks_v2';
+        this.apiURL = '/api/bookmarks';
+        this.bookmarks = [];
+        this.syncInProgress = false;
+        this.init();
     }
-    
-    const jsonString = JSON.stringify(arr);
-    if (jsonString.length > 5000000) { // ~5MB limit for most browsers
-      console.error('setBookmarks: Bookmarks data too large to save');
-      return false;
-    }
-    
-    localStorage.setItem(BOOKMARK_KEY, jsonString);
-    console.log(`Saved ${arr.length} bookmarks to localStorage`);
-    
-    // Notify UI listeners of the update
-    const event = new CustomEvent('newszoid:bookmarks-updated', { 
-      detail: { 
-        count: arr.length,
-        timestamp: new Date().toISOString()
-      } 
-    });
-    document.dispatchEvent(event);
-    
-    return true;
-  } catch (e) {
-    console.error('Failed to save bookmarks:', e);
-    // Try to recover by clearing corrupted data
-    try {
-      localStorage.removeItem(BOOKMARK_KEY);
-      console.warn('Cleared potentially corrupted bookmarks data');
-    } catch (cleanupError) {
-      console.error('Failed to clear bookmarks after error:', cleanupError);
-    }
-    return false;
-  }
-}
 
-/**
- * Generate stable article id (if not present) from headline or timestamp.
- * Reuses any existing data-article-id attribute if present.
- */
-function ensureArticleId(articleEl) {
-  if (!articleEl) return null;
-  if (articleEl.dataset && articleEl.dataset.articleId) return articleEl.dataset.articleId;
-  const headline = (articleEl.querySelector('h2, h3, .story-headline')?.textContent || '').trim();
-  const slug = headline ? headline.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'').slice(0,60) : `a${Date.now()}`;
-  const id = `article_${slug}`;
-  articleEl.dataset.articleId = id;
-  return id;
-}
-
-/**
- * Toggle bookmark for an article element (server-backed).
- * Tries server API first, falls back to localStorage if offline/unauthenticated.
- * Returns true if saved, false if removed.
- */
-async function toggleBookmarkForArticle(articleEl) {
-  const id = ensureArticleId(articleEl);
-  if (!id) return false;
-
-  const title = articleEl.querySelector('h2, h3, .story-headline')?.textContent?.trim() || 'Untitled';
-  const snippet = articleEl.querySelector('p')?.textContent?.trim().slice(0, 200) || '';
-  const url = articleEl.querySelector('a[href]')?.getAttribute('href') || window.location.href;
-  const img = articleEl.querySelector('img')?.src || '';
-
-  // Try server API if available
-  if (window.AuthClient && window.AuthClient.apiToggleBookmark) {
-    try {
-      const res = await window.AuthClient.apiToggleBookmark({
-        articleId: id,
-        title,
-        snippet,
-        url,
-        img
-      });
-
-      if (res.added) {
-        // Update local cache for offline access
-        const bookmarks = getBookmarks();
-        if (!bookmarks.some(b => b.id === id)) {
-          bookmarks.unshift({ id, title, snippet, url, img, savedAt: Date.now() });
-          setBookmarks(bookmarks);
+    async init() {
+        // Load from localStorage first
+        this.loadFromStorage();
+        
+        // Try to sync with backend if user is logged in
+        if (this.isUserLoggedIn()) {
+            await this.syncWithBackend();
         }
-        renderSavedArticles();
-        return true;
-      } else if (res.removed) {
-        // Remove from local cache
-        const bookmarks = getBookmarks().filter(b => b.id !== id);
-        setBookmarks(bookmarks);
-        renderSavedArticles();
-        return false;
-      }
-      return false;
-    } catch (err) {
-      if (err.message === 'unauthenticated') {
-        // Show login modal
-        const loginModal = document.getElementById('loginModal');
-        if (loginModal) loginModal.style.display = 'block';
-        return false;
-      }
-      // API error - fall back to localStorage
-      console.warn('Bookmark API error, using localStorage:', err.message);
+        
+        // Update UI
+        this.renderBookmarks();
     }
-  }
 
-  // Fallback: use localStorage only
-  const bookmarks = getBookmarks();
-  const idx = bookmarks.findIndex(b => b.id === id);
-  if (idx >= 0) {
-    bookmarks.splice(idx, 1);
-    setBookmarks(bookmarks);
-    renderSavedArticles();
-    return false;
-  } else {
-    bookmarks.unshift({ id, title, snippet, url, img, savedAt: Date.now() });
-    setBookmarks(bookmarks);
-    renderSavedArticles();
-    return true;
-  }
+    isUserLoggedIn() {
+        return !!localStorage.getItem('newszoid_loggedInUser');
+    }
+
+    loadFromStorage() {
+        try {
+            const stored = localStorage.getItem(this.storageKey);
+            this.bookmarks = stored ? JSON.parse(stored) : [];
+        } catch (error) {
+            console.error('Failed to load bookmarks:', error);
+            this.bookmarks = [];
+        }
+    }
+
+    saveToStorage() {
+        try {
+            localStorage.setItem(this.storageKey, JSON.stringify(this.bookmarks));
+        } catch (error) {
+            console.error('Failed to save bookmarks:', error);
+        }
+    }
+
+    async syncWithBackend() {
+        if (this.syncInProgress) return;
+        this.syncInProgress = true;
+
+        try {
+            // Fetch server bookmarks
+            const response = await fetch(this.apiURL, {
+                credentials: 'include'
+            });
+
+            if (response.ok) {
+                const serverBookmarks = await response.json();
+                
+                // Merge with local bookmarks (server takes precedence)
+                this.mergeBookmarks(serverBookmarks.data || []);
+                this.saveToStorage();
+            }
+        } catch (error) {
+            console.warn('Bookmark sync failed:', error);
+        } finally {
+            this.syncInProgress = false;
+        }
+    }
+
+    mergeBookmarks(serverBookmarks) {
+        const merged = new Map();
+        
+        // Add server bookmarks first
+        serverBookmarks.forEach(bookmark => {
+            merged.set(bookmark.id, bookmark);
+        });
+        
+        // Add local bookmarks that aren't on server
+        this.bookmarks.forEach(bookmark => {
+            if (!merged.has(bookmark.id)) {
+                merged.set(bookmark.id, bookmark);
+            }
+        });
+        
+        this.bookmarks = Array.from(merged.values());
+    }
+
+    async add(article) {
+        const bookmark = {
+            id: article.id || this.generateId(),
+            title: article.title || 'Untitled',
+            url: article.url || window.location.href,
+            image: article.image || '',
+            snippet: article.snippet || '',
+            source: article.source || 'Newszoid',
+            savedAt: Date.now()
+        };
+
+        // Check if already bookmarked
+        const exists = this.bookmarks.find(b => b.id === bookmark.id);
+        if (exists) {
+            return false;
+        }
+
+        // Add to local storage
+        this.bookmarks.unshift(bookmark);
+        this.saveToStorage();
+
+        // Sync with backend if logged in
+        if (this.isUserLoggedIn()) {
+            this.syncBookmarkToServer(bookmark);
+        }
+
+        this.renderBookmarks();
+        return true;
+    }
+
+    async remove(bookmarkId) {
+        const index = this.bookmarks.findIndex(b => b.id === bookmarkId);
+        if (index === -1) return false;
+
+        // Remove from local
+        this.bookmarks.splice(index, 1);
+        this.saveToStorage();
+
+        // Remove from server if logged in
+        if (this.isUserLoggedIn()) {
+            this.deleteBookmarkFromServer(bookmarkId);
+        }
+
+        this.renderBookmarks();
+        return true;
+    }
+
+    async syncBookmarkToServer(bookmark) {
+        try {
+            await fetch(this.apiURL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify(bookmark)
+            });
+        } catch (error) {
+            console.warn('Failed to sync bookmark to server:', error);
+        }
+    }
+
+    async deleteBookmarkFromServer(bookmarkId) {
+        try {
+            await fetch(`${this.apiURL}/${bookmarkId}`, {
+                method: 'DELETE',
+                credentials: 'include'
+            });
+        } catch (error) {
+            console.warn('Failed to delete bookmark from server:', error);
+        }
+    }
+
+    isBookmarked(articleId) {
+        return this.bookmarks.some(b => b.id === articleId);
+    }
+
+    getAll() {
+        return [...this.bookmarks];
+    }
+
+    generateId() {
+        return `bookmark_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    renderBookmarks() {
+        const container = document.getElementById('savedArticlesList');
+        const placeholder = document.getElementById('noSavedPlaceholder');
+        
+        if (!container) return;
+
+        if (this.bookmarks.length === 0) {
+            container.innerHTML = '';
+            if (placeholder) placeholder.style.display = 'block';
+            return;
+        }
+
+        if (placeholder) placeholder.style.display = 'none';
+
+        container.innerHTML = this.bookmarks.map(bookmark => `
+            <div class="saved-item" data-bookmark-id="${bookmark.id}">
+                ${bookmark.image ? `
+                    <img src="${bookmark.image}" 
+                         alt="${this.escapeHTML(bookmark.title)}"
+                         class="saved-item-image"
+                         onerror="this.style.display='none'">
+                ` : ''}
+                
+                <div class="saved-item-content">
+                    <h4>${this.escapeHTML(bookmark.title)}</h4>
+                    ${bookmark.snippet ? `
+                        <p>${this.escapeHTML(bookmark.snippet.substring(0, 100))}...</p>
+                    ` : ''}
+                    <div class="saved-item-meta">
+                        <span class="saved-item-source">${this.escapeHTML(bookmark.source)}</span>
+                        <span class="saved-item-date">${this.formatDate(bookmark.savedAt)}</span>
+                    </div>
+                </div>
+                
+                <div class="saved-actions">
+                    <button class="saved-action-btn open-btn" 
+                            data-url="${this.escapeHTML(bookmark.url)}"
+                            aria-label="Open article">
+                        🔗 Open
+                    </button>
+                    <button class="saved-action-btn remove-btn" 
+                            data-bookmark-id="${bookmark.id}"
+                            aria-label="Remove bookmark">
+                        🗑️ Remove
+                    </button>
+                </div>
+            </div>
+        `).join('');
+
+        // Attach event listeners
+        this.attachBookmarkListeners(container);
+    }
+
+    attachBookmarkListeners(container) {
+        // Open article
+        container.querySelectorAll('.open-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const url = btn.dataset.url;
+                if (url && url !== '#') {
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                }
+            });
+        });
+
+        // Remove bookmark
+        container.querySelectorAll('.remove-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const bookmarkId = btn.dataset.bookmarkId;
+                
+                if (confirm('Remove this saved article?')) {
+                    await this.remove(bookmarkId);
+                    this.showToast('Article removed from saved items', 'success');
+                }
+            });
+        });
+    }
+
+    escapeHTML(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    formatDate(timestamp) {
+        const date = new Date(timestamp);
+        const now = Date.now();
+        const diff = now - timestamp;
+        
+        if (diff < 3600000) { // Less than 1 hour
+            const mins = Math.floor(diff / 60000);
+            return `${mins} min ago`;
+        } else if (diff < 86400000) { // Less than 1 day
+            const hours = Math.floor(diff / 3600000);
+            return `${hours}h ago`;
+        } else {
+            return date.toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric' 
+            });
+        }
+    }
+
+    showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        toast.setAttribute('role', 'alert');
+        
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
 }
 
-/**
- * Escape HTML to avoid XSS when reusing saved strings
- */
-function escapeHtml(str) {
-  return String(str || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-}
+// ============================================================
+// INITIALIZE BOOKMARK SYSTEM
+// ============================================================
+const bookmarkManager = new BookmarkManager();
 
-/**
- * Initialize bookmark buttons by delegating click on bookmark UI
- * Adds the saved state to buttons if article is already saved.
- */
-function initBookmarkUI() {
-  // delegate clicks on .share-btn.bookmark
-  document.addEventListener('click', async function (e) {
-    const btn = e.target.closest('.share-btn.bookmark');
-    if (!btn) return;
+// ============================================================
+// ATTACH TO BOOKMARK BUTTONS
+// ============================================================
+document.addEventListener('click', async (e) => {
+    const bookmarkBtn = e.target.closest('.share-btn.bookmark');
+    if (!bookmarkBtn) return;
+
     e.preventDefault();
     e.stopPropagation();
-    
-    const article = btn.closest('article, .story-item, .story-card, .main-story');
+
+    const article = bookmarkBtn.closest('article, .story-card, .story-item');
     if (!article) return;
-    
-    btn.disabled = true; // Prevent double-click
-    const saved = await toggleBookmarkForArticle(article);
-    btn.disabled = false;
-    btn.classList.toggle('saved', saved);
-    btn.textContent = saved ? '★' : '☆';
-    
-    // Show feedback
-    const feedback = document.createElement('div');
-    feedback.className = 'bookmark-feedback';
-    feedback.textContent = saved ? 'Saved!' : 'Removed!';
-    document.body.appendChild(feedback);
-    
-    // Position near the button
-    const rect = btn.getBoundingClientRect();
-    feedback.style.top = `${rect.top - 30}px`;
-    feedback.style.left = `${rect.left + rect.width/2 - 30}px`;
-    
-    // Animate and remove
-    setTimeout(() => {
-      feedback.style.opacity = '0';
-      feedback.style.transform = 'translateY(-10px)';
-      setTimeout(() => feedback.remove(), 300);
-    }, 800);
-  });
 
-  // add saved class to buttons on load based on storage
-  document.querySelectorAll('.share-btn.bookmark').forEach(btn => {
-    const article = btn.closest('article, .story-item, .story-card, .main-story');
-    if (!article) return;
-    
-    const id = ensureArticleId(article);
-    if (id && getBookmarks().some(b => b.id === id)) {
-      btn.classList.add('saved');
-      btn.textContent = '★';
+    const articleId = article.dataset.articleId;
+    const isBookmarked = bookmarkManager.isBookmarked(articleId);
+
+    if (isBookmarked) {
+        // Remove bookmark
+        const removed = await bookmarkManager.remove(articleId);
+        if (removed) {
+            bookmarkBtn.classList.remove('saved');
+            bookmarkBtn.textContent = '☆';
+            bookmarkBtn.setAttribute('aria-label', 'Save article');
+            showBookmarkFeedback(bookmarkBtn, false);
+        }
     } else {
-      btn.classList.remove('saved');
-      btn.textContent = '☆';
-    }
-  });
-}
+        // Add bookmark
+        const articleData = {
+            id: articleId,
+            title: article.querySelector('h2, h3, .story-headline')?.textContent.trim(),
+            url: article.querySelector('a')?.href || window.location.href,
+            image: article.querySelector('img')?.src,
+            snippet: article.querySelector('p, .story-text')?.textContent.trim(),
+            source: article.querySelector('.story-source')?.textContent || 'Newszoid'
+        };
 
-/**
- * Render saved articles from server API
- */
-async function renderSavedArticlesFromServer() {
-  const container = document.getElementById('savedArticlesList');
-  const placeholder = document.getElementById('noSavedPlaceholder');
-  if (!container) return;
-
-  try {
-    // Check if API is available
-    if (!window.AuthClient || !window.AuthClient.apiGetBookmarks) {
-      // Fall back to localStorage
-      renderSavedArticles();
-      return;
-    }
-
-    const data = await window.AuthClient.apiGetBookmarks();
-    const bookmarks = data.items || data.bookmarks || [];
-
-    if (!bookmarks.length) {
-      container.innerHTML = '';
-      if (placeholder) placeholder.style.display = 'block';
-      return;
-    }
-
-    if (placeholder) placeholder.style.display = 'none';
-
-    container.innerHTML = bookmarks.map(b => `
-      <div class="saved-item" data-id="${b._id || b.id}">
-        <h4>${escapeHtml(b.title)}</h4>
-        ${b.img ? `<img src="${escapeHtml(b.img)}" alt="" class="saved-item-img" loading="lazy">` : ''}
-        <p>${escapeHtml(b.snippet)}</p>
-        <div class="saved-actions">
-          <button data-open="${b._id || b.id}" class="open-saved">Open</button>
-          <button data-remove="${b._id || b.id}" class="remove-saved">Remove</button>
-        </div>
-      </div>
-    `).join('');
-
-    // Attach handlers
-    container.querySelectorAll('.open-saved').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const id = e.currentTarget.dataset.open;
-        const art = document.querySelector(`[data-article-id="${id}"]`);
-        if (art) {
-          art.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          art.style.transition = 'box-shadow 0.5s ease';
-          art.style.boxShadow = '0 0 0 2px var(--accent-color)';
-          setTimeout(() => {
-            art.style.boxShadow = 'none';
-          }, 2000);
-        } else {
-          const item = bookmarks.find(x => (x._id || x.id) === id);
-          if (item && item.url) window.open(item.url, '_blank');
-          else alert('Article not present on this page. It will be available in your profile.');
+        const added = await bookmarkManager.add(articleData);
+        if (added) {
+            bookmarkBtn.classList.add('saved');
+            bookmarkBtn.textContent = '★';
+            bookmarkBtn.setAttribute('aria-label', 'Remove bookmark');
+            showBookmarkFeedback(bookmarkBtn, true);
         }
-      });
-    });
-
-    container.querySelectorAll('.remove-saved').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        const id = e.currentTarget.dataset.remove;
-        try {
-          if (window.AuthClient && window.AuthClient.apiDeleteBookmark) {
-            await window.AuthClient.apiDeleteBookmark(id);
-          }
-          // Refresh the list
-          renderSavedArticlesFromServer();
-
-          // Update bookmark button on page
-          const article = document.querySelector(`[data-article-id="${id}"]`);
-          if (article) {
-            const bookmarkBtn = article.querySelector('.share-btn.bookmark');
-            if (bookmarkBtn) {
-              bookmarkBtn.classList.remove('saved');
-              bookmarkBtn.textContent = '☆';
-            }
-          }
-        } catch (err) {
-          console.error('Failed to remove bookmark:', err);
-          alert('Failed to remove bookmark');
-        }
-      });
-    });
-  } catch (err) {
-    console.error('Failed to fetch bookmarks from server:', err);
-    // Fall back to localStorage
-    renderSavedArticles();
-  }
-}
-
-/**
- * Render saved articles in the sidebar/profile saved list (localStorage fallback).
- */
-function renderSavedArticles() {
-  const container = document.getElementById('savedArticlesList');
-  const placeholder = document.getElementById('noSavedPlaceholder');
-  if (!container) return;
-  
-  const bookmarks = getBookmarks();
-  if (!bookmarks.length) {
-    container.innerHTML = '';
-    if (placeholder) placeholder.style.display = 'block';
-    return;
-  }
-  
-  if (placeholder) placeholder.style.display = 'none';
-  
-  container.innerHTML = bookmarks.map(b => `
-    <div class="saved-item" data-id="${b.id}">
-      <h4>${escapeHtml(b.title)}</h4>
-      ${b.img ? `<img src="${escapeHtml(b.img)}" alt="" class="saved-item-img" loading="lazy">` : ''}
-      <p>${escapeHtml(b.snippet)}</p>
-      <div class="saved-actions">
-        <button data-open="${b.id}" class="open-saved">Open</button>
-        <button data-remove="${b.id}" class="remove-saved">Remove</button>
-      </div>
-    </div>
-  `).join('');
-
-  // attach handlers
-  container.querySelectorAll('.open-saved').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.dataset.open;
-      // try scroll to article if on same page
-      const art = document.querySelector(`[data-article-id="${id}"]`);
-      if (art) {
-        art.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Add highlight effect
-        art.style.transition = 'box-shadow 0.5s ease';
-        art.style.boxShadow = '0 0 0 2px var(--accent-color)';
-        setTimeout(() => {
-          art.style.boxShadow = 'none';
-        }, 2000);
-      } else {
-        // otherwise navigate to saved url (if stored)
-        const item = getBookmarks().find(x => x.id === id);
-        if (item && item.url) window.open(item.url, '_blank');
-        else alert('Article not present on this page. It will be available in your profile.');
-      }
-    });
-  });
-  
-  container.querySelectorAll('.remove-saved').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const id = e.currentTarget.dataset.remove;
-      const arr = getBookmarks().filter(x => x.id !== id);
-      setBookmarks(arr);
-      renderSavedArticles();
-      
-      // Also update any bookmark buttons on the page
-      const article = document.querySelector(`[data-article-id="${id}"]`);
-      if (article) {
-        const btn = article.querySelector('.share-btn.bookmark');
-        if (btn) {
-          btn.classList.remove('saved');
-          btn.textContent = '☆';
-        }
-      }
-    });
-  });
-}
-
-// Initialize bookmark functionality when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
-  initBookmarkUI();
-  
-  // Try server API first, fall back to localStorage
-  if (window.AuthClient && window.AuthClient.apiGetBookmarks) {
-    renderSavedArticlesFromServer();
-  } else {
-    renderSavedArticles();
-  }
-  
-  // Listen for bookmark updates
-  document.addEventListener('newszoid:bookmarks-updated', () => {
-    if (window.AuthClient && window.AuthClient.apiGetBookmarks) {
-      renderSavedArticlesFromServer();
-    } else {
-      renderSavedArticles();
     }
-  });
 });
 
+// ============================================================
+// INITIALIZE BOOKMARK STATES ON PAGE LOAD
+// ============================================================
+function initializeBookmarkStates() {
+    document.querySelectorAll('.share-btn.bookmark').forEach(btn => {
+        const article = btn.closest('article, .story-card, .story-item');
+        if (!article) return;
 
+        const articleId = article.dataset.articleId;
+        if (bookmarkManager.isBookmarked(articleId)) {
+            btn.classList.add('saved');
+            btn.textContent = '★';
+            btn.setAttribute('aria-label', 'Remove bookmark');
+        }
+    });
+}
+
+// ============================================================
+// BOOKMARK FEEDBACK ANIMATION
+// ============================================================
+function showBookmarkFeedback(button, saved) {
+    const feedback = document.createElement('div');
+    feedback.className = 'bookmark-feedback';
+    feedback.textContent = saved ? 'Saved!' : 'Removed';
+    feedback.style.cssText = `
+        position: fixed;
+        padding: 8px 16px;
+        background: ${saved ? '#4CAF50' : '#f44336'};
+        color: white;
+        border-radius: 4px;
+        font-size: 14px;
+        z-index: 10000;
+        pointer-events: none;
+        animation: bookmarkPulse 0.8s ease-out;
+    `;
+
+    const rect = button.getBoundingClientRect();
+    feedback.style.top = `${rect.top - 40}px`;
+    feedback.style.left = `${rect.left + rect.width / 2 - 30}px`;
+
+    document.body.appendChild(feedback);
+
+    setTimeout(() => {
+        feedback.style.opacity = '0';
+        feedback.style.transform = 'translateY(-10px)';
+        setTimeout(() => feedback.remove(), 300);
+    }, 800);
+}
+
+// ============================================================
+// AUTO-INITIALIZE
+// ============================================================
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeBookmarkStates);
+} else {
+    initializeBookmarkStates();
+}
+
+// Export for global access
+window.bookmarkManager = bookmarkManager;

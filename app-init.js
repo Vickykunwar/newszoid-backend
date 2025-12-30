@@ -265,13 +265,13 @@
 
                 container.innerHTML = '<div class="loading-weather">Loading weather...</div>';
 
-                const response = await newsAPI.getWeather(
-                    window.userLocation.lat,
-                    window.userLocation.lon
+                const city = window.userLocation?.city || 'Delhi';
+                const data = await newsAPI.fetchWithCache(
+                    `${window.API_BASE}/weather?city=${encodeURIComponent(city)}`
                 );
 
-                if (response.ok && response.data) {
-                    const w = response.data;
+                if (data.ok) {
+                    const w = data;
                     container.innerHTML = `
                         <div class="weather-current">
                             <span class="weather-icon">${this.getWeatherIcon(w.condition)}</span>
