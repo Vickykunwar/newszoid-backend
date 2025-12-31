@@ -42,7 +42,8 @@ app.use(helmet({
         "https://newszoid-backend-production.up.railway.app",
         "https://api.anthropic.com",
         "https://gnews.io",
-        "https://content.guardianapis.com"
+        "https://content.guardianapis.com",
+        "https://nominatim.openstreetmap.org"
       ],
       fontSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
@@ -73,8 +74,10 @@ const corsOptions = {
     if (!origin && !isProduction) return callback(null, true);
 
     if (allowedOrigins.indexOf(origin) !== -1 || !isProduction) {
+      if (origin) console.log(`✅ CORS Allowed: ${origin}`);
       callback(null, true);
     } else {
+      console.warn(`❌ CORS Blocked: ${origin}. Add this to FRONTEND_ORIGIN env var.`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -135,6 +138,11 @@ if (!isProduction) {
 // =============================================================
 // DATABASE CONNECTION
 // =============================================================
+
+if (!process.env.MONGO_URI) {
+  console.error('CRITICAL ERROR: MONGO_URI is not defined in environment variables!');
+  if (isProduction) process.exit(1);
+}
 
 const mongoOptions = {
   useNewUrlParser: true,
