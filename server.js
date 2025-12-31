@@ -37,7 +37,13 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
       imgSrc: ["'self'", "data:", "https:", "http:"],
-      connectSrc: ["'self'", "https://api.anthropic.com", "https://gnews.io", "https://content.guardianapis.com"],
+      connectSrc: [
+        "'self'",
+        "https://newszoid-backend-production.up.railway.app",
+        "https://api.anthropic.com",
+        "https://gnews.io",
+        "https://content.guardianapis.com"
+      ],
       fontSrc: ["'self'", "https:", "data:"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
@@ -90,7 +96,7 @@ app.use(cookieParser());
 // Rate limiting - more strict in production
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '50', 10),
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '300', 10),
   message: {
     ok: false,
     error: 'Too many requests from this IP, please try again later.'
