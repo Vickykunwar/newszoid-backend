@@ -12,7 +12,9 @@
   // ============================================================
   const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
   const isBackendServing = window.location.port === '4000';
-  const API_BASE = 'https://newszoid-backend-production.up.railway.app/api';
+  const API_BASE = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_URL)
+    ? `${import.meta.env.VITE_API_URL}/api`
+    : 'https://newszoid-backend-production.up.railway.app/api';
   window.API_BASE = API_BASE;
 
 
