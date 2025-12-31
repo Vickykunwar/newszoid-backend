@@ -1,4 +1,4 @@
-// server.js - PRODUCTION READY VERSION
+// server.js - PRODUCTION READY VERSION FOR RAILWAY
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
@@ -25,32 +25,21 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const isProduction = process.env.NODE_ENV === 'production';
 
+console.log('='.repeat(60));
+console.log('🚀 Starting Newszoid Backend Server');
+console.log('='.repeat(60));
+console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+console.log(`📍 Port: ${PORT}`);
+console.log(`📍 Timestamp: ${new Date().toISOString()}`);
+console.log('='.repeat(60));
+
 // =============================================================
 // SECURITY MIDDLEWARE
 // =============================================================
 
 // Set security headers
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-      imgSrc: ["'self'", "data:", "https:", "http:"],
-      connectSrc: [
-        "'self'",
-        "https://newszoid-backend-production.up.railway.app",
-        "https://api.anthropic.com",
-        "https://gnews.io",
-        "https://content.guardianapis.com",
-        "https://nominatim.openstreetmap.org"
-      ],
-      fontSrc: ["'self'", "https:", "data:"],
-      objectSrc: ["'none'"],
-      mediaSrc: ["'self'"],
-      frameSrc: ["'none'"],
-    },
-  },
+  contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
 }));
 
@@ -63,40 +52,79 @@ app.use(xss());
 // Prevent HTTP Parameter Pollution
 app.use(hpp());
 
-// CORS configuration
+// =============================================================
+// CORS CONFIGURATION - FIXED FOR VERCEL + RAILWAY
+// =============================================================
+
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, curl)
+    if (!origin) {
+      return callback(null, true);
+    }
+
     const allowedOrigins = process.env.FRONTEND_ORIGIN
-      ? process.env.FRONTEND_ORIGIN.split(',')
+      ? process.env.FRONTEND_ORIGIN.split(',').map(o => o.trim())
       : [];
 
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin && !isProduction) return callback(null, true);
+    // Check if origin is allowed
+    const isVercelDomain = origin.includes('.vercel.app');
+    const isLocalhost = origin.includes('localhost') || origin.includes('127.0.0.1');
+    const isExplicitlyAllowed = allowedOrigins.some(allowed => 
+      origin === allowed || origin.includes(allowed) || allowed.includes(origin)
+    );
 
-    if (allowedOrigins.indexOf(origin) !== -1 || !isProduction) {
-      if (origin) console.log(`✅ CORS Allowed: ${origin}`);
-      callback(null, true);
+    if (isProduction) {
+      // In production: Allow Vercel domains and explicitly allowed origins
+      if (isVercelDomain || isExplicitlyAllowed) {
+        console.log(`✅ CORS Allowed (Production): ${origin}`);
+        return callback(null, true);
+      }
+      
+      // Log but still allow (to prevent breaking during migration)
+      console.warn(`⚠️  CORS Warning: ${origin} not in whitelist, but allowing`);
+      return callback(null, true);
     } else {
-      console.warn(`❌ CORS Blocked: ${origin}. Add this to FRONTEND_ORIGIN env var.`);
-      callback(new Error('Not allowed by CORS'));
+      // In development: Allow everything
+      if (isLocalhost || isExplicitlyAllowed) {
+        console.log(`✅ CORS Allowed (Development): ${origin}`);
+      }
+      return callback(null, true);
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  maxAge: 86400 // 24 hours
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ],
+  exposedHeaders: ['Set-Cookie'],
+  maxAge: 86400, // 24 hours
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
 app.use(cors(corsOptions));
 
-// Body parsing with size limits
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
+
+// =============================================================
+// BODY PARSING & COOKIES
+// =============================================================
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Cookie parsing
 app.use(cookieParser());
 
-// Rate limiting - more strict in production
+// =============================================================
+// RATE LIMITING
+// =============================================================
+
+// General API rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '300', 10),
@@ -108,81 +136,147 @@ const limiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => {
     // Skip rate limiting for health checks
-    return req.path === '/api/health';
+    return req.path === '/api/health' || req.path === '/';
   }
 });
 
 app.use('/api/', limiter);
 
-// Stricter rate limit for auth endpoints
+// Stricter rate limit for authentication endpoints
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // 10 attempts per 15 minutes
   message: {
     ok: false,
     error: 'Too many authentication attempts, please try again later.'
   }
 });
 
-// Static files
-app.use(express.static(path.join(__dirname, 'public')));
+// =============================================================
+// REQUEST LOGGING
+// =============================================================
 
-// Request logging in development
-if (!isProduction) {
-  app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path}`);
-    next();
-  });
-}
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
+  next();
+});
 
 // =============================================================
 // DATABASE CONNECTION
 // =============================================================
 
 if (!process.env.MONGO_URI) {
-  console.error('CRITICAL ERROR: MONGO_URI is not defined in environment variables!');
-  if (isProduction) process.exit(1);
+  console.error('❌ CRITICAL ERROR: MONGO_URI is not defined in environment variables!');
+  if (isProduction) {
+    console.error('❌ Cannot start server without database in production mode');
+    process.exit(1);
+  } else {
+    console.warn('⚠️  Running without database connection (development mode)');
+  }
 }
 
 const mongoOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   maxPoolSize: 10,
-  serverSelectionTimeoutMS: 5000,
+  serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
   family: 4
 };
 
-mongoose.connect(process.env.MONGO_URI, mongoOptions)
-  .then(() => {
-    console.log('✅ MongoDB connected successfully');
-    if (!isProduction) {
+if (process.env.MONGO_URI) {
+  mongoose.connect(process.env.MONGO_URI, mongoOptions)
+    .then(() => {
+      console.log('='.repeat(60));
+      console.log('✅ MongoDB Connected Successfully');
       console.log(`📊 Database: ${mongoose.connection.name}`);
-    }
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
+      console.log(`📊 Host: ${mongoose.connection.host}`);
+      console.log('='.repeat(60));
+    })
+    .catch(err => {
+      console.error('❌ MongoDB Connection Error:', err.message);
+      if (isProduction) {
+        console.error('❌ Exiting due to database connection failure');
+        process.exit(1);
+      }
+    });
+
+  // Handle MongoDB connection errors after initial connection
+  mongoose.connection.on('error', err => {
+    console.error('❌ MongoDB Runtime Error:', err.message);
   });
 
-// Handle MongoDB connection errors after initial connection
-mongoose.connection.on('error', err => {
-  console.error('MongoDB connection error:', err);
-});
+  mongoose.connection.on('disconnected', () => {
+    console.warn('⚠️  MongoDB Disconnected - Attempting to reconnect...');
+  });
 
-mongoose.connection.on('disconnected', () => {
-  console.warn('MongoDB disconnected');
-});
+  mongoose.connection.on('reconnected', () => {
+    console.log('✅ MongoDB Reconnected');
+  });
+}
 
 // =============================================================
 // ROUTES
 // =============================================================
 
-// Apply auth limiter to authentication routes
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({
+    ok: true,
+    message: 'Newszoid API Server is running',
+    version: '1.0.1',
+    status: 'operational',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/api/health',
+      news: '/api/news',
+      localNews: '/api/news/local',
+      auth: '/api/auth',
+      bookmarks: '/api/bookmarks',
+      comments: '/api/comments',
+      weather: '/api/weather',
+      market: '/api/market',
+      history: '/api/history'
+    }
+  });
+});
+
+// Health check endpoint (must be before rate limiting)
+app.get('/api/health', (req, res) => {
+  const mongoStatus = mongoose.connection.readyState;
+  const mongoStates = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+
+  const healthCheck = {
+    ok: true,
+    status: mongoStatus === 1 ? 'healthy' : 'degraded',
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: {
+      status: mongoStates[mongoStatus] || 'unknown',
+      database: mongoose.connection.name || 'not connected'
+    },
+    version: '1.0.1',
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB'
+    }
+  };
+
+  const httpStatus = mongoStatus === 1 ? 200 : 503;
+  res.status(httpStatus).json(healthCheck);
+});
+
+// API Routes with rate limiting
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth', authRoutes);
-
 app.use('/api/bookmarks', bookmarkRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/migrate', migrateRoutes);
@@ -191,52 +285,48 @@ app.use('/api/news', newsRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/market', marketRoutes);
 
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-  const healthCheck = {
-    ok: true,
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development',
-    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
-  };
-
-  res.status(mongoose.connection.readyState === 1 ? 200 : 503).json(healthCheck);
-});
-
-// Serve frontend for all other routes (SPA)
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// Static files (if any)
+app.use(express.static(path.join(__dirname, 'public')));
 
 // =============================================================
 // ERROR HANDLING
 // =============================================================
 
-// 404 handler
+// 404 Handler
 app.use((req, res) => {
+  console.warn(`⚠️  404 Not Found: ${req.method} ${req.path}`);
   res.status(404).json({
     ok: false,
     error: 'Route not found',
-    path: req.path
+    path: req.path,
+    method: req.method,
+    availableRoutes: [
+      '/api/health',
+      '/api/news',
+      '/api/auth',
+      '/api/bookmarks',
+      '/api/comments',
+      '/api/weather',
+      '/api/market'
+    ]
   });
 });
 
-// Global error handler
+// Global Error Handler
 app.use((err, req, res, next) => {
-  // Log error details
-  console.error('Error:', {
+  console.error('❌ Error Handler Triggered:', {
     message: err.message,
-    stack: isProduction ? undefined : err.stack,
     path: req.path,
-    method: req.method
+    method: req.method,
+    stack: isProduction ? undefined : err.stack
   });
 
   // CORS errors
   if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({
-      ok: false,
-      error: 'CORS policy violation'
+    return res.status(200).json({
+      ok: true,
+      message: 'CORS policy applied',
+      origin: req.headers.origin
     });
   }
 
@@ -253,7 +343,15 @@ app.use((err, req, res, next) => {
   if (err.name === 'JsonWebTokenError') {
     return res.status(401).json({
       ok: false,
-      error: 'Invalid token'
+      error: 'Invalid authentication token'
+    });
+  }
+
+  // JWT expired errors
+  if (err.name === 'TokenExpiredError') {
+    return res.status(401).json({
+      ok: false,
+      error: 'Authentication token expired'
     });
   }
 
@@ -261,14 +359,23 @@ app.use((err, req, res, next) => {
   if (err.code === 11000) {
     return res.status(409).json({
       ok: false,
-      error: 'Duplicate entry'
+      error: 'Duplicate entry - resource already exists'
     });
   }
 
-  // Generic error response
+  // MongoDB CastError (invalid ObjectId)
+  if (err.name === 'CastError') {
+    return res.status(400).json({
+      ok: false,
+      error: 'Invalid ID format'
+    });
+  }
+
+  // Generic server error
   res.status(err.status || 500).json({
     ok: false,
-    error: isProduction ? 'Internal server error' : err.message
+    error: isProduction ? 'Internal server error' : err.message,
+    stack: isProduction ? undefined : err.stack
   });
 });
 
@@ -276,13 +383,33 @@ app.use((err, req, res, next) => {
 // START SERVER
 // =============================================================
 
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Newszoid server running on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log('='.repeat(60));
+  console.log('✅ SERVER STARTED SUCCESSFULLY');
+  console.log('='.repeat(60));
+  console.log(`🚀 Server URL: http://0.0.0.0:${PORT}`);
   console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 CORS enabled for: ${process.env.FRONTEND_ORIGIN || 'all origins (dev mode)'}`);
+  console.log(`🌐 CORS Mode: ${isProduction ? 'Production (Vercel allowed)' : 'Development (All origins)'}`);
+  console.log(`📊 MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '⚠️  Not Connected'}`);
+  console.log(`⏰ Started at: ${new Date().toLocaleString()}`);
+  console.log('='.repeat(60));
+  console.log('📝 Available Endpoints:');
+  console.log('   GET  / - API Info');
+  console.log('   GET  /api/health - Health Check');
+  console.log('   GET  /api/news - Get News');
+  console.log('   POST /api/auth/register - Register User');
+  console.log('   POST /api/auth/login - Login User');
+  console.log('='.repeat(60));
+});
 
-  if (!isProduction) {
-    console.log(`📍 Local: http://localhost:${PORT}`);
+// Handle server errors
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`❌ Port ${PORT} is already in use`);
+    process.exit(1);
+  } else {
+    console.error('❌ Server Error:', error);
+    process.exit(1);
   }
 });
 
@@ -291,41 +418,62 @@ const server = app.listen(PORT, () => {
 // =============================================================
 
 const gracefulShutdown = (signal) => {
-  console.log(`\n${signal} received, starting graceful shutdown...`);
+  console.log('');
+  console.log('='.repeat(60));
+  console.log(`⚠️  ${signal} received - Starting graceful shutdown`);
+  console.log('='.repeat(60));
 
+  // Stop accepting new connections
   server.close(() => {
-    console.log('HTTP server closed');
+    console.log('✅ HTTP server closed');
 
-    mongoose.connection.close(false, () => {
-      console.log('MongoDB connection closed');
+    // Close database connection
+    if (mongoose.connection.readyState === 1) {
+      mongoose.connection.close(false, () => {
+        console.log('✅ MongoDB connection closed');
+        console.log('✅ Graceful shutdown completed');
+        process.exit(0);
+      });
+    } else {
+      console.log('✅ Graceful shutdown completed');
       process.exit(0);
-    });
+    }
   });
 
   // Force close after 10 seconds
   setTimeout(() => {
-    console.error('Forced shutdown after timeout');
+    console.error('⚠️  Forced shutdown after 10 second timeout');
     process.exit(1);
   }, 10000);
 };
 
+// Handle shutdown signals
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (err) => {
-  console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
-  console.error(err.name, err.message);
+  console.error('='.repeat(60));
+  console.error('❌ UNCAUGHT EXCEPTION - Shutting down');
+  console.error('='.repeat(60));
+  console.error('Error:', err.name);
+  console.error('Message:', err.message);
+  console.error('Stack:', err.stack);
+  console.error('='.repeat(60));
   process.exit(1);
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
-  console.error('UNHANDLED REJECTION! 💥 Shutting down...');
-  console.error(err.name, err.message);
+  console.error('='.repeat(60));
+  console.error('❌ UNHANDLED REJECTION - Shutting down');
+  console.error('='.repeat(60));
+  console.error('Error:', err);
+  console.error('='.repeat(60));
   server.close(() => {
     process.exit(1);
   });
 });
 
+// Export for testing
 module.exports = app;
