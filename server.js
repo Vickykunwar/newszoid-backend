@@ -212,7 +212,6 @@ mongoose.connection.on('disconnected', () => {
 mongoose.connection.on('reconnected', () => {
   console.log('✅ MongoDB Reconnected');
 });
-}
 
 // =============================================================
 // ROUTES
