@@ -153,6 +153,11 @@ exports.getNews = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page || '1', 10));
     const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize || '10', 10)));
 
+    // Redirect category 'local' to getLocalNews logic
+    if (category === 'local') {
+      return exports.getLocalNews(req, res);
+    }
+
     // Build cache key
     const cacheKey = `news:${category}:p${page}:s${pageSize}`;
     const cached = cache.get(cacheKey);
@@ -168,7 +173,14 @@ exports.getNews = async (req, res) => {
     }
 
     // Get search query for category
-    const searchQuery = CATEGORY_MAP[category] || category;
+    const location = (req.query.location || '').trim();
+    let searchQuery = CATEGORY_MAP[category] || category;
+
+    // Append location to search query for higher relevance if provided
+    if (location && category !== 'general' && category !== 'world') {
+      searchQuery = `${searchQuery} ${location}`;
+    }
+
     const requests = buildAPIRequests(searchQuery, page, pageSize);
 
     // If no API keys configured, use fallback
