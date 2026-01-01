@@ -22,6 +22,7 @@ const weatherRoutes = require('./routes/weather');
 const marketRoutes = require('./routes/market');
 
 const app = express();
+// Priority: 1. Railway assigned PORT, 2. Manual PORT env, 3. Fallback 4000
 const PORT = process.env.PORT || 4000;
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -178,8 +179,6 @@ if (!process.env.MONGO_URI) {
 }
 
 const mongoOptions = {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
   maxPoolSize: 10,
   serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
@@ -187,6 +186,7 @@ const mongoOptions = {
 };
 
 if (process.env.MONGO_URI) {
+  console.log('🔌 Attempting to connect to MongoDB...');
   mongoose.connect(process.env.MONGO_URI, mongoOptions)
     .then(() => {
       console.log('='.repeat(60));
