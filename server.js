@@ -29,7 +29,8 @@ console.log('='.repeat(60));
 console.log('🚀 Starting Newszoid Backend Server');
 console.log('='.repeat(60));
 console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-console.log(`📍 Port: ${PORT}`);
+console.log(`📍 Railway Port: ${process.env.PORT || 'NOT SET (using fallback)'}`);
+console.log(`📍 Final Port: ${PORT}`);
 console.log(`📍 Timestamp: ${new Date().toISOString()}`);
 console.log('='.repeat(60));
 
