@@ -22,7 +22,12 @@ const weatherRoutes = require('./routes/weather');
 const marketRoutes = require('./routes/market');
 
 const app = express();
-const PORT = Number(process.env.PORT) || 4000;
+const PORT = Number(process.env.PORT);
+
+if (!PORT) {
+  console.error('❌ PORT not provided by Railway');
+  process.exit(1);
+}
 const isProduction = process.env.NODE_ENV === 'production';
 
 console.log('='.repeat(60));
@@ -39,7 +44,7 @@ console.log('✅ Step 1: Trust Proxy configured');
 
 // START SERVER IMMEDIATELY (To satisfy Railway health check)
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Step 2: Server listening on port ${PORT}`);
+  console.log(`✅ Server listening on Railway port ${PORT}`);
   console.log('='.repeat(60));
 });
 
