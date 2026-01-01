@@ -22,8 +22,11 @@ const weatherRoutes = require('./routes/weather');
 const marketRoutes = require('./routes/market');
 
 const app = express();
-// Priority: 1. Railway assigned PORT, 2. Manual PORT env, 3. Fallback 4000
-const PORT = process.env.PORT || 4000;
+const PORT = Number(process.env.PORT);
+
+if (!PORT) {
+  throw new Error("PORT is not provided by Railway");
+}
 const isProduction = process.env.NODE_ENV === 'production';
 
 console.log('='.repeat(60));
@@ -386,33 +389,7 @@ app.use((err, req, res, next) => {
 // =============================================================
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log('='.repeat(60));
-  console.log('✅ SERVER STARTED SUCCESSFULLY');
-  console.log('='.repeat(60));
-  console.log(`🚀 Server URL: http://0.0.0.0:${PORT}`);
-  console.log(`🔒 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 CORS Mode: ${isProduction ? 'Production (Vercel allowed)' : 'Development (All origins)'}`);
-  console.log(`📊 MongoDB: ${mongoose.connection.readyState === 1 ? '✅ Connected' : '⚠️  Not Connected'}`);
-  console.log(`⏰ Started at: ${new Date().toLocaleString()}`);
-  console.log('='.repeat(60));
-  console.log('📝 Available Endpoints:');
-  console.log('   GET  / - API Info');
-  console.log('   GET  /api/health - Health Check');
-  console.log('   GET  /api/news - Get News');
-  console.log('   POST /api/auth/register - Register User');
-  console.log('   POST /api/auth/login - Login User');
-  console.log('='.repeat(60));
-});
-
-// Handle server errors
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`❌ Port ${PORT} is already in use`);
-    process.exit(1);
-  } else {
-    console.error('❌ Server Error:', error);
-    process.exit(1);
-  }
+  console.log(`🚀 Server listening on port ${PORT}`);
 });
 
 // =============================================================
