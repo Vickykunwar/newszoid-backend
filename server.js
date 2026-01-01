@@ -192,29 +192,26 @@ if (process.env.MONGO_URI) {
       console.log('='.repeat(60));
       console.log('✅ MongoDB Connected Successfully');
       console.log(`📊 Database: ${mongoose.connection.name}`);
-      console.log(`📊 Host: ${mongoose.connection.host}`);
       console.log('='.repeat(60));
     })
     .catch(err => {
       console.error('❌ MongoDB Connection Error:', err.message);
-      if (isProduction) {
-        console.error('❌ Exiting due to database connection failure');
-        process.exit(1);
-      }
+      console.log('⚠️  Server will remain running for health checks, but DB features may fail.');
     });
+}
 
-  // Handle MongoDB connection errors after initial connection
-  mongoose.connection.on('error', err => {
-    console.error('❌ MongoDB Runtime Error:', err.message);
-  });
+// Handle MongoDB connection errors after initial connection
+mongoose.connection.on('error', err => {
+  console.error('❌ MongoDB Runtime Error:', err.message);
+});
 
-  mongoose.connection.on('disconnected', () => {
-    console.warn('⚠️  MongoDB Disconnected - Attempting to reconnect...');
-  });
+mongoose.connection.on('disconnected', () => {
+  console.warn('⚠️  MongoDB Disconnected - Attempting to reconnect...');
+});
 
-  mongoose.connection.on('reconnected', () => {
-    console.log('✅ MongoDB Reconnected');
-  });
+mongoose.connection.on('reconnected', () => {
+  console.log('✅ MongoDB Reconnected');
+});
 }
 
 // =============================================================
