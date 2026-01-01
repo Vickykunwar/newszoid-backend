@@ -61,25 +61,30 @@ app.use(xss());
 // Prevent HTTP Parameter Pollution
 app.use(hpp());
 
-const allowedOrigins = [
-  "https://newszoid.vercel.app",
-  "https://newszoid.com",
-  "https://www.newszoid.com"
-];
-
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow server-to-server & health checks
+  origin: (origin, callback) => {
+    const allowed = [
+      "https://newszoid.com",
+      "https://www.newszoid.com",
+      "https://newszoid.vercel.app"
+    ];
+
+    // allow server-to-server & curl
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
+    if (allowed.includes(origin)) {
       return callback(null, true);
     }
 
-    return callback(new Error("CORS not allowed"), false);
+    console.error("Blocked by CORS:", origin);
+    return callback(new Error("Not allowed by CORS"));
   },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
 }));
+
+app.options("*", cors());
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
