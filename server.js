@@ -145,6 +145,8 @@ const frontendPath = path.join(__dirname, '../FRONTEND');
 if (require('fs').existsSync(frontendPath)) {
   app.use(express.static(frontendPath));
 }
+// Also serve the backend's own public folder (for sitemaps, etc.)
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Error Handling
 app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
