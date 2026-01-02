@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">
+  <url>
+    <loc>https://www.newszoid.com/india/supreme-court-reviews-constitutional-amendments</loc>
+    <news:news>
+      <news:publication>
+        <news:name>Newszoid</news:name>
+        <news:language>en</news:language>
+      </news:publication>
+      <news:publication_date>2026-01-02T19:40:40Z</news:publication_date>
+      <news:title>Supreme Court Reviews Constitutional Amendments</news:title>
+    </news:news>
+  </url>
+  <url>
+    <loc>https://www.newszoid.com/india/parliament-passes-digital-privacy-bill</loc>
+    <news:news>
+      <news:publication>
+        <news:name>Newszoid</news:name>
+        <news:language>en</news:language>
+      </news:publication>
+      <news:publication_date>2026-01-02T19:40:40Z</news:publication_date>
+      <news:title>Parliament Passes Digital Privacy Bill</news:title>
+    </news:news>
+  </url>
+  <url>
+    <loc>https://www.newszoid.com/world/climate-summit-reaches-historic-agreement</loc>
+    <news:news>
+      <news:publication>
+        <news:name>Newszoid</news:name>
+        <news:language>en</news:language>
+      </news:publication>
+      <news:publication_date>2026-01-02T19:40:40Z</news:publication_date>
+      <news:title>Climate Summit Reaches Historic Agreement</news:title>
+    </news:news>
+  </url>
+  <url>
+    <loc>https://www.newszoid.com/technology/ai-revolution-transforms-industries</loc>
+    <news:news>
+      <news:publication>
+        <news:name>Newszoid</news:name>
+        <news:language>en</news:language>
+      </news:publication>
+      <news:publication_date>2026-01-02T19:40:40Z</news:publication_date>
+      <news:title>AI Revolution Transforms Industries</news:title>
+    </news:news>
+  </url>
+  <url>
+    <loc>https://www.newszoid.com/business/stock-markets-hit-record-highs</loc>
+    <news:news>
+      <news:publication>
+        <news:name>Newszoid</news:name>
+        <news:language>en</news:language>
+      </news:publication>
+      <news:publication_date>2026-01-02T19:40:40Z</news:publication_date>
+      <news:title>Stock Markets Hit Record Highs</news:title>
+    </news:news>
+  </url>
+</urlset>
