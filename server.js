@@ -143,6 +143,13 @@ console.log('✅ Step 8: Routes Registered');
 // Static files
 const frontendPath = path.join(__dirname, '../FRONTEND');
 if (require('fs').existsSync(frontendPath)) {
+  // Set no-cache for index.html and service-worker to ensure updates
+  app.use((req, res, next) => {
+    if (req.path === '/' || req.path === '/index.html' || req.path === '/service-worker.js') {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    }
+    next();
+  });
   app.use(express.static(frontendPath));
 }
 // Also serve the backend's own public folder (for sitemaps, etc.)
