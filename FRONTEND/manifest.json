@@ -1,0 +1,18 @@
+{
+  "name": "Newszoid",
+  "short_name": "Newszoid",
+  "description": "Personalized business news, live rates, price alerts, and AI market analysis.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#141414",
+  "categories": ["business", "news", "productivity"],
+  "icons": [
+    {
+      "src": "/logo-icon.png",
+      "sizes": "any",
+      "type": "image/png"
+    }
+  ]
+}
