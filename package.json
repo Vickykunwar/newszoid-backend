@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "start": "cd BACKEND && node server.js",
-    "dev": "cd BACKEND && nodemon server.js",
+    "dev": "nodemon --watch BACKEND BACKEND/server.js",
     "build": "echo 'No build step required - Node.js backend ready for deployment'",
     "vercel-build": "echo 'Vercel build complete - Node.js backend ready'",
     "test": "jest --coverage --maxWorkers=2",
@@ -83,21 +83,20 @@
   },
   "nodemonConfig": {
     "watch": [
-      "server.js",
-      "routes/**/*.js",
-      "controllers/**/*.js",
-      "models/**/*.js",
-      "middleware/**/*.js",
-      "utils/**/*.js"
+      "BACKEND/server.js",
+      "BACKEND/routes/**/*.js",
+      "BACKEND/controllers/**/*.js",
+      "BACKEND/models/**/*.js",
+      "BACKEND/middleware/**/*.js",
+      "BACKEND/utils/**/*.js"
     ],
     "ext": "js,json",
     "ignore": [
       "node_modules/**",
-      "test/**",
+      "BACKEND/test/**",
       "*.test.js",
       ".git/**"
     ],
-    "exec": "node server.js",
     "env": {
       "NODE_ENV": "development"
     }

@@ -1,0 +1,14 @@
+{
+  "name": "Newszoid Business Intelligence",
+  "short_name": "Newszoid",
+  "description": "AI-powered business intelligence for Indian SMBs",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#141414",
+  "theme_color": "#141414",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/logo-icon.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/logo-icon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

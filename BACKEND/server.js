@@ -46,13 +46,15 @@ app.use(xss());
 // Prevent HTTP Parameter Pollution
 app.use(hpp());
 
+// BUG FIX: Support both FRONTEND_ORIGINS (plural) and FRONTEND_ORIGIN (singular legacy)
+// so the .env value is actually respected instead of being silently ignored.
 app.use(cors({
   origin: (origin, callback) => {
-    const allowed = (process.env.FRONTEND_ORIGINS || [
-      'https://newszoid.com',
-      'https://www.newszoid.com',
-      'https://newszoid.vercel.app',
-    ].join(','))
+    const rawOrigins =
+      process.env.FRONTEND_ORIGINS ||
+      process.env.FRONTEND_ORIGIN ||
+      'https://newszoid.com,https://www.newszoid.com,https://newszoid.vercel.app';
+    const allowed = rawOrigins
       .split(',')
       .map(value => value.trim())
       .filter(Boolean);
@@ -84,10 +86,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// Rate Limiting
+// BUG FIX: Rate Limiter now reads windowMs and max from env vars so .env values
+// (RATE_LIMIT_WINDOW_MS=900000, RATE_LIMIT_MAX_REQUESTS=50) are actually applied.
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 300,
   message: { ok: false, error: 'Too many requests' },
   skip: (req) => req.path === '/api/health' || req.path === '/'
 });
@@ -141,8 +144,11 @@ if (shouldServeFrontend && require('fs').existsSync(frontendPath)) {
 // Also serve the backend's own public folder (for sitemaps, etc.)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Error Handling
-app.use((req, res) => res.status(404).json({ ok: false, error: 'Not found' }));
+// BUG FIX: 404 catch-all must come before the 4-argument error handler.
+// The error handler must be the VERY last middleware so Express recognises
+// it as an error handler (requires exactly 4 arguments: err, req, res, next).
+app.use((req, res, _next) => res.status(404).json({ ok: false, error: 'Not found' }));
+// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.message);
   res.status(err.status || 500).json({ ok: false, error: isProduction ? 'Internal error' : err.message });
