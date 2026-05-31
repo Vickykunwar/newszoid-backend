@@ -731,9 +731,11 @@ exports.fetchRateHistory = async (req, res) => {
 
 exports.fetchAnalyst = async (req, res) => {
   try {
-    const { name, businessType, city, items = [] } = req.body;
+    const { name, businessType, city, items = [], prompt, question } = req.body;
     const ownerName = name || 'Business Owner';
-    const key = cacheKey('analyst', businessType, city, items.sort().join(','));
+    
+    const cacheIdentifier = question ? `analyst-${question}` : 'analyst';
+    const key = cacheKey(cacheIdentifier, businessType, city, items.sort().join(','));
     const cached = analystCache.get(key);
 
     if (cached) {
@@ -742,7 +744,12 @@ exports.fetchAnalyst = async (req, res) => {
 
     const systemPrompt = `You are a senior business analyst at Newszoid, India's premier business intelligence platform. You provide clear, actionable, personalized analysis for Indian business owners. Be thorough and professional.`;
 
-    const userPrompt = `Business Profile:
+    let userPrompt;
+    
+    if (prompt) {
+      userPrompt = prompt;
+    } else {
+      userPrompt = `Business Profile:
 - Owner: ${ownerName}
 - City: ${city}
 - Industry: ${businessType}
@@ -784,7 +791,7 @@ Write a BUSINESS INTELLIGENCE BRIEF formatted as strict HTML. Do not use Markdow
 
 <h2>ZOIDRA RATING</h2>
 <p><strong>Business Conditions Score: X/10</strong><br>Reason: [1 sentence reason]</p>`;
-
+    }
     const analysisRaw = await callGemini(systemPrompt, userPrompt);
     const analysis = sanitizeOutput(analysisRaw);
 
