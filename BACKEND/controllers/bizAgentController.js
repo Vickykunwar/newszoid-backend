@@ -574,7 +574,8 @@ exports.fetchRates = async (req, res) => {
         .json({ ok: false, error: 'No items provided. Add your materials in the setup.' });
     }
 
-    const key = cacheKey('rates', businessType, city, items.sort().join(','));
+    const sortedItems = [...items].sort();
+    const key = cacheKey('rates', businessType, city, sortedItems.join(','));
     const cached = ratesCache.get(key);
 
     if (cached) {
@@ -734,8 +735,9 @@ exports.fetchAnalyst = async (req, res) => {
     const { name, businessType, city, items = [], prompt, question } = req.body;
     const ownerName = name || 'Business Owner';
     
-    const cacheIdentifier = question ? `analyst-${question}` : 'analyst';
-    const key = cacheKey(cacheIdentifier, businessType, city, items.sort().join(','));
+    const cacheIdentifier = prompt ? 'analyst-' + Math.abs(prompt.split('').reduce((a, b) => ((a << 5) - a) + b.charCodeAt(0), 0)) : 'analyst';
+    const sortedItems = [...items].sort();
+    const key = cacheKey(cacheIdentifier, businessType, city, sortedItems.join(','));
     const cached = analystCache.get(key);
 
     if (cached) {
@@ -792,7 +794,7 @@ Write a BUSINESS INTELLIGENCE BRIEF formatted as strict HTML. Do not use Markdow
 <h2>ZOIDRA RATING</h2>
 <p><strong>Business Conditions Score: X/10</strong><br>Reason: [1 sentence reason]</p>`;
     }
-    const analysisRaw = await callGemini(systemPrompt, userPrompt);
+    const analysisRaw = await callGeminiWithSearch(systemPrompt, userPrompt);
     const analysis = sanitizeOutput(analysisRaw);
 
     analystCache.set(key, analysis);
@@ -844,6 +846,11 @@ exports.saveProfile = async (req, res) => {
     });
   } catch (err) {
     console.error('Biz Agent Profile Save error:', err.message);
-    return res.status(500).json({ ok: false, error: err.message });
+    return res.status(500).json({
+      ok: false,
+      error: process.env.NODE_ENV === 'production' ? 'Could not save profile' : err.message
+    });
   }
 };
+e x p o r t s . c a l l G e m i n i   =   c a l l G e m i n i ;  
+ 

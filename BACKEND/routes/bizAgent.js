@@ -68,6 +68,8 @@ router.post(
     '/analyst',
     [
         body('name').isString().trim().optional(),
+        body('prompt').optional().isString().isLength({ max: 10000 }),
+        body('question').optional().isString().isLength({ max: 500 }),
         ...profileValidationBase
     ],
     validate,
@@ -92,15 +94,7 @@ router.post(
 // POST /api/biz-agent/chat
 // Generic endpoint (fallback)
 // ============================================================
-// Initialize Gemini for fallback route
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const GEMINI_MODEL_CANDIDATES = (
-    process.env.GEMINI_MODEL_CANDIDATES || 'gemini-2.5-flash,gemini-2.0-flash'
-)
-    .split(',')
-    .map(model => model.trim())
-    .filter(Boolean);
-
+// /chat route refactored to use centralized AI logic
 router.post(
     '/chat',
     [
@@ -119,16 +113,7 @@ router.post(
     async (req, res) => {
         try {
             const { systemPrompt, userPrompt } = req.body;
-
-            const model = genAI.getGenerativeModel({
-                model: GEMINI_MODEL_CANDIDATES[0],
-                systemInstruction: systemPrompt,
-            });
-
-            const result = await model.generateContent(userPrompt);
-            const response = result.response;
-            const text = response.text();
-
+            const text = await bizAgentController.callGemini(systemPrompt, userPrompt);
             res.json({ ok: true, text });
         } catch (err) {
             console.error('❌ Biz Agent error:', err.message);

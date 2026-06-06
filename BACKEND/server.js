@@ -5,7 +5,6 @@ const mongoose = require('mongoose');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
-const xss = require('xss-clean');
 const hpp = require('hpp');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
@@ -41,14 +40,13 @@ app.use(helmet({
 
 // Sanitize data against NoSQL injection
 app.use(mongoSanitize());
-// Prevent XSS attacks
-app.use(xss());
+// Prevent XSS attacks (Handled by sanitize-html in controllers)
 // Prevent HTTP Parameter Pollution
 app.use(hpp());
 
 // BUG FIX: Support both FRONTEND_ORIGINS (plural) and FRONTEND_ORIGIN (singular legacy)
 // so the .env value is actually respected instead of being silently ignored.
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     const rawOrigins =
       process.env.FRONTEND_ORIGINS ||
@@ -70,15 +68,17 @@ app.use(cors({
       return callback(null, true);
     }
 
-    console.error("Blocked by CORS:", origin);
-    return callback(new Error("Not allowed by CORS"));
+    console.error('Blocked by CORS:', origin);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
-app.options("*", cors());
+app.use(cors(corsOptions));
+
+app.options('*', cors(corsOptions));
 
 app.use(compression());
 
@@ -170,10 +170,10 @@ const shutdown = (signal) => {
   });
 };
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
-
 if (require.main === module) {
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   // Start only when this file is executed directly. Tests import the app without opening a port.
   server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Server listening on Railway port ${PORT}`);
