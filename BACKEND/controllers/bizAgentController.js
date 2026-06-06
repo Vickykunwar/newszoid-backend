@@ -529,7 +529,7 @@ exports.fetchNews = async (req, res) => {
     const systemPrompt = `You are the Newszoid Business Intelligence Agent. You provide highly personalized industry news to Indian business owners. Use Google Search to find the latest real news from today or this week. Always focus on actionable, relevant news. Return structured data only with no preamble and no markdown headers.`;
 
     const userPrompt = `Search Google for today's latest real news (${today()}) relevant to a ${businessType} business owner in ${city}, India.
-${items.length > 0 ? `This owner uses these materials/items: ${items.join(', ')}. Search for real news about price changes, supply issues, or policy changes for these specific items.` : ''}
+${items.length > 0 ? `Please include a mix of general industry news for ${businessType} AND specific news about these materials/items if available: ${items.join(', ')}.` : ''}
 
 Search for real recent news articles and return only a valid JSON array of exactly 6 news objects. Each object must have:
 - headline: string (catchy, informative, max 12 words)
