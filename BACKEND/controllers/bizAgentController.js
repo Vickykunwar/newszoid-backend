@@ -852,5 +852,4 @@ exports.saveProfile = async (req, res) => {
     });
   }
 };
-e x p o r t s . c a l l G e m i n i   =   c a l l G e m i n i ;  
- 
+exports.callGemini = callGemini;
