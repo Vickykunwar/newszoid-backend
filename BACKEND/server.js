@@ -1,4 +1,4 @@
-// server.js - PRODUCTION READY VERSION FOR RAILWAY
+// server.js - PRODUCTION READY VERSION FOR VERCEL
 require('dotenv').config({ path: require('path').resolve(__dirname, '../.env') });
 const express = require('express');
 const mongoose = require('mongoose');
@@ -176,7 +176,7 @@ if (require.main === module) {
 
   // Start only when this file is executed directly. Tests import the app without opening a port.
   server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server listening on Railway port ${PORT}`);
+    console.log(`✅ Server listening on port ${PORT}`);
     console.log('='.repeat(60));
   });
 }

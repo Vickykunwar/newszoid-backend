@@ -12,6 +12,26 @@ const GEMINI_MODEL_CANDIDATES = (
   .map(model => model.trim())
   .filter(Boolean);
 
+// ── Groq Configuration ──
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL_CANDIDATES = (
+  process.env.GROQ_MODEL_CANDIDATES || 'llama-3.3-70b-versatile,llama-3.1-8b-instant'
+)
+  .split(',')
+  .map(model => model.trim())
+  .filter(Boolean);
+
+// AI provider preference: 'parallel' (race both), 'gemini-first', 'groq-first'
+const AI_STRATEGY = process.env.AI_STRATEGY || 'parallel';
+
+if (GROQ_API_KEY) {
+  console.log(`✅ Groq AI configured with models: ${GROQ_MODEL_CANDIDATES.join(', ')}`);
+  console.log(`   AI Strategy: ${AI_STRATEGY}`);
+} else {
+  console.warn('⚠️  GROQ_API_KEY not set — Groq disabled, using Gemini only');
+}
+
 const newsCache = new NodeCache({ stdTTL: 1800 });
 const ratesCache = new NodeCache({ stdTTL: 900 });
 const analystCache = new NodeCache({ stdTTL: 7200 });
@@ -484,7 +504,7 @@ async function generateWithGemini({ systemPrompt, userPrompt, useSearch = false 
         const model = genAI.getGenerativeModel(options);
         const result = await model.generateContent(userPrompt);
 
-        console.log(`Gemini request succeeded with ${modelName}`);
+        console.log(`✅ Gemini succeeded with ${modelName}`);
         return result.response.text();
       } catch (err) {
         const kind = classifyError(err);
@@ -505,15 +525,182 @@ async function generateWithGemini({ systemPrompt, userPrompt, useSearch = false 
     }
   }
 
-  throw new Error('All configured Gemini models are unavailable right now. Please try again shortly.');
+  throw new Error('All configured Gemini models are unavailable right now.');
 }
 
+// ── Groq Provider ──
+async function generateWithGroq({ systemPrompt, userPrompt }) {
+  if (!GROQ_API_KEY) {
+    throw new Error('Groq API key not configured');
+  }
+
+  for (const modelName of GROQ_MODEL_CANDIDATES) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const response = await fetch(GROQ_API_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: modelName,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+            temperature: 0.7,
+            max_tokens: 4096,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.text().catch(() => '');
+          const status = response.status;
+
+          // Rate limited — retry once
+          if (status === 429 && attempt < 2) {
+            console.warn(`Groq ${modelName} rate-limited, retry in 2s...`);
+            await sleep(2000);
+            continue;
+          }
+
+          // Model not found — try next model
+          if (status === 404) {
+            console.warn(`Groq model ${modelName} not found, trying next...`);
+            break;
+          }
+
+          throw new Error(`Groq API error ${status}: ${errorBody.slice(0, 200)}`);
+        }
+
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content;
+
+        if (!text) {
+          throw new Error('Groq returned empty response');
+        }
+
+        console.log(`✅ Groq succeeded with ${modelName} (${data.usage?.total_tokens || '?'} tokens)`);
+        return text;
+      } catch (err) {
+        if (err.message.includes('not found') || err.message.includes('404')) {
+          break; // try next model
+        }
+        if (attempt < 2) {
+          console.warn(`Groq ${modelName} attempt ${attempt} failed: ${err.message}`);
+          await sleep(1000);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  throw new Error('All configured Groq models are unavailable right now.');
+}
+
+// ── Dual-Provider AI Call (Parallel Race or Sequential Failover) ──
+async function firstSuccessfulProvider(providerCalls) {
+  const pending = new Set(
+    providerCalls.map(({ provider, call }) => ({
+      provider,
+      promise: call()
+        .then(text => ({ provider, text }))
+        .catch(error => ({ provider, error })),
+    }))
+  );
+  const failures = [];
+
+  while (pending.size > 0) {
+    const { entry, outcome } = await Promise.race(
+      [...pending].map(entry => entry.promise.then(outcome => ({ entry, outcome })))
+    );
+
+    pending.delete(entry);
+
+    if (outcome.text) {
+      console.log(`AI Race: ${outcome.provider} won.`);
+
+      if (pending.size > 0) {
+        Promise.allSettled([...pending].map(item => item.promise)).then(results => {
+          results.forEach(result => {
+            if (result.status !== 'fulfilled') return;
+            const loser = result.value;
+            if (loser.text) {
+              console.log(`AI Race: ${loser.provider} also succeeded after ${outcome.provider}.`);
+            } else if (loser.error) {
+              console.warn(
+                `AI Race: ${loser.provider} failed after ${outcome.provider}: ${loser.error.message}`
+              );
+            }
+          });
+        });
+      }
+
+      return outcome.text;
+    }
+
+    failures.push(`${outcome.provider}: ${outcome.error?.message || 'empty response'}`);
+    console.warn(`AI Race: ${outcome.provider} failed, waiting for remaining provider...`);
+  }
+
+  throw new Error(`All AI providers failed: ${failures.join(' | ')}`);
+}
+
+async function callAI(systemPrompt, userPrompt, { useSearch = false } = {}) {
+  const geminiCall = () => generateWithGemini({ systemPrompt, userPrompt, useSearch });
+  const groqCall = () => generateWithGroq({ systemPrompt, userPrompt });
+
+  // If Groq not configured, just use Gemini
+  if (!GROQ_API_KEY) {
+    return geminiCall();
+  }
+
+  // CRITICAL: When search grounding is needed (rates, news, analyst),
+  // Groq has NO web search capability — it would hallucinate data.
+  // Force Gemini-first with Groq fallback for search-critical calls.
+  if (useSearch) {
+    try {
+      return await geminiCall();
+    } catch (geminiErr) {
+      console.warn(`Gemini (search) failed (${geminiErr.message}), falling back to Groq (no search)...`);
+      return await groqCall();
+    }
+  }
+
+  if (AI_STRATEGY === 'parallel') {
+    // Race both providers — fastest valid response wins
+    return firstSuccessfulProvider([
+      { provider: 'gemini', call: geminiCall },
+      { provider: 'groq', call: groqCall },
+    ]);
+  } else if (AI_STRATEGY === 'groq-first') {
+    try {
+      return await groqCall();
+    } catch (groqErr) {
+      console.warn(`Groq failed (${groqErr.message}), falling back to Gemini...`);
+      return await geminiCall();
+    }
+
+  } else {
+    // 'gemini-first' (default)
+    try {
+      return await geminiCall();
+    } catch (geminiErr) {
+      console.warn(`Gemini failed (${geminiErr.message}), falling back to Groq...`);
+      return await groqCall();
+    }
+  }
+}
+
+// Backward-compatible wrappers (used by routes/bizAgent.js)
 async function callGemini(systemPrompt, userPrompt) {
-  return generateWithGemini({ systemPrompt, userPrompt });
+  return callAI(systemPrompt, userPrompt);
 }
 
 async function callGeminiWithSearch(systemPrompt, userPrompt) {
-  return generateWithGemini({ systemPrompt, userPrompt, useSearch: true });
+  return callAI(systemPrompt, userPrompt, { useSearch: true });
 }
 
 exports.fetchNews = async (req, res) => {
@@ -853,3 +1040,4 @@ exports.saveProfile = async (req, res) => {
   }
 };
 exports.callGemini = callGemini;
+exports.callAI = callAI;

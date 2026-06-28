@@ -3,7 +3,6 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const bizAgentController = require('../controllers/bizAgentController');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // Generic validation middleware
 const validate = (req, res, next) => {
@@ -106,7 +105,7 @@ router.post(
         body('userPrompt')
             .isString()
             .trim()
-            .isLength({ min: 10, max: 10000 })
+            .isLength({ min: 2, max: 10000 })
             .withMessage('userPrompt must be 10-10000 characters'),
     ],
     validate,
