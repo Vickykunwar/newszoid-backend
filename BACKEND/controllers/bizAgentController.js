@@ -931,13 +931,16 @@ exports.fetchAnalyst = async (req, res) => {
       return res.json({ ok: true, analysis: cached, cached: true });
     }
 
-    const systemPrompt = `You are a senior business analyst at Newszoid, India's premier business intelligence platform. You provide clear, actionable, personalized analysis for Indian business owners. Be thorough and professional.`;
-
+    let systemPrompt;
     let userPrompt;
     
     if (prompt) {
+      // Short Q&A mode — frontend sends a specific question with its own rules
+      systemPrompt = `You are a concise business advisor for Indian business owners. Answer questions directly in 2-3 sentences. No greetings, no headers, no HTML. Be specific with numbers and prices. End with one action recommendation.`;
       userPrompt = prompt;
     } else {
+      // Full report mode — generate comprehensive HTML brief
+      systemPrompt = `You are a senior business analyst at Newszoid, India's premier business intelligence platform. You provide clear, actionable, personalized analysis for Indian business owners. Be thorough and professional.`;
       userPrompt = `Business Profile:
 - Owner: ${ownerName}
 - City: ${city}
@@ -984,7 +987,9 @@ Write a BUSINESS INTELLIGENCE BRIEF formatted as strict HTML. Do not use Markdow
     const analysisRaw = await callGeminiWithSearch(systemPrompt, userPrompt);
     const analysis = sanitizeOutput(analysisRaw);
 
-    analystCache.set(key, analysis);
+    // Q&A mode: cache 5 min, Full report: default 2 hours
+    const cacheTTL = prompt ? 300 : undefined;
+    analystCache.set(key, analysis, cacheTTL);
     return res.json({ ok: true, analysis, cached: false });
   } catch (err) {
     console.error('Biz Agent Analyst error:', err.message);
