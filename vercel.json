@@ -1,8 +1,14 @@
 {
   "version": 2,
   "functions": {
-    "api/[...path].js": {
+    "api/index.js": {
       "includeFiles": "BACKEND/**"
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index.js"
+    }
+  ]
 }
