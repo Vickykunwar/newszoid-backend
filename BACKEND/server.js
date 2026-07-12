@@ -88,23 +88,19 @@ app.options('*', cors(corsOptions));
 
 app.use(compression());
 
-// Vercel Serverless Functions pre-parse the request body and consume the raw
-// stream before Express sees it. When express.json() then tries to read the
-// already-consumed stream it throws a 400 "Bad Request" error.
-//
-// Fix: If Vercel already parsed the body (flagged by api/index.js wrapper),
-// skip express.json(). Otherwise parse normally, catching stream errors.
+// Body parsing — api/index.js exports config.api.bodyParser=false to tell
+// Vercel not to consume the stream. Express handles parsing here.
+// Error catching remains as a safety net for edge cases.
 const jsonParser = express.json({ limit: '10mb' });
 const urlencodedParser = express.urlencoded({ extended: true, limit: '10mb' });
 
 app.use((req, res, next) => {
-  // Vercel already parsed the body — req.body is set, stream is consumed.
-  if (req._vercelParsed || (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0)) {
-    return next();
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+    return next(); // Already parsed (e.g. by platform or tests)
   }
-  // Not on Vercel (or GET request) — parse normally, but catch stream errors.
   jsonParser(req, res, (err) => {
     if (err && (err.type === 'stream.not.readable' || err.status === 400)) {
+      console.warn('[BodyParser] Stream consumed, body lost. Check bodyParser config.');
       req.body = req.body || {};
       return next();
     }
@@ -113,14 +109,11 @@ app.use((req, res, next) => {
   });
 });
 app.use((req, res, next) => {
-  if (req._vercelParsed || (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0)) {
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
     return next();
   }
   urlencodedParser(req, res, (err) => {
-    if (err) {
-      req.body = req.body || {};
-      return next();
-    }
+    if (err) { req.body = req.body || {}; return next(); }
     next();
   });
 });
