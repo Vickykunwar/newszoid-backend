@@ -15,6 +15,7 @@ const compression = require('compression');
 const bizAgentRoutes = require('./routes/bizAgent');
 const newsProxyRoutes = require('./routes/newsProxy');
 const whatsappAlertController = require('./controllers/whatsappAlertController');
+const briefController = require('./controllers/briefController');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -140,6 +141,7 @@ console.log('🚀 Step 7: Registering Routes...');
 app.use('/api/biz-agent', bizAgentRoutes);
 app.use('/api/news-proxy', newsProxyRoutes);
 app.all('/api/whatsapp-alert', whatsappAlertController.handler);
+app.post('/api/brief', briefController);
 console.log('✅ Step 8: Routes Registered');
 
 // Static files

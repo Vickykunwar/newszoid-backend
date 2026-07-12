@@ -1,5 +1,5 @@
 const sanitizeHtml = require('sanitize-html');
-const { getAIResponse } = require('../lib/ai-router');
+const { getAIResponse } = require('../../lib/ai-router');
 
 function sanitizeBrief(html) {
   return sanitizeHtml(String(html || ''), {
