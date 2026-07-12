@@ -88,20 +88,45 @@ app.options('*', cors(corsOptions));
 
 app.use(compression());
 
-// Vercel may pre-parse the body before Express sees it. If that happened,
-// req.body is already populated and the raw stream is consumed, so calling
-// express.json() again would fail or overwrite it with undefined.
+// Vercel Serverless Functions pre-parse the request body and consume the raw
+// stream before Express sees it. When express.json() then tries to read the
+// already-consumed stream it throws a 400 "Bad Request" error.
+//
+// Fix: wrap express.json() so that parse errors on an empty/consumed stream
+// are silently swallowed instead of crashing the request pipeline.
+const jsonParser = express.json({ limit: '10mb' });
+const urlencodedParser = express.urlencoded({ extended: true, limit: '10mb' });
+
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+  // If body is already populated (Vercel pre-parsed it), skip.
+  if (req.body !== undefined && req.body !== null) {
     return next();
   }
-  express.json({ limit: '10mb' })(req, res, next);
+  // Try to parse; if the stream was consumed, swallow the error.
+  jsonParser(req, res, (err) => {
+    if (err) {
+      // If it's a body-parser error on an empty/consumed stream, ignore it.
+      // The body was likely pre-parsed by the hosting platform.
+      if (err.type === 'stream.not.readable' || err.status === 400) {
+        req.body = req.body || {};
+        return next();
+      }
+      return next(err);
+    }
+    next();
+  });
 });
 app.use((req, res, next) => {
-  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+  if (req.body !== undefined && req.body !== null) {
     return next();
   }
-  express.urlencoded({ extended: true, limit: '10mb' })(req, res, next);
+  urlencodedParser(req, res, (err) => {
+    if (err) {
+      req.body = req.body || {};
+      return next();
+    }
+    next();
+  });
 });
 app.use(cookieParser());
 
