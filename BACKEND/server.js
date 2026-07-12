@@ -123,11 +123,23 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({
     ok: true,
     status: 'online',
+    version: 'v3',
     database: databaseStatus,
     mongodb: databaseStatus,
     readyState: readyState,
     hasMongoUri: !!process.env.MONGO_URI,
     timestamp: new Date().toISOString(),
+  });
+});
+
+// Temporary debug endpoint to diagnose body parsing on Vercel
+app.post('/api/debug-body', (req, res) => {
+  res.json({
+    bodyType: typeof req.body,
+    bodyKeys: req.body ? Object.keys(req.body) : null,
+    bodyContent: req.body,
+    hasBody: !!req.body,
+    contentType: req.headers['content-type'],
   });
 });
 console.log('✅ Step 3: Health Check registered');
