@@ -92,32 +92,28 @@ app.use(compression());
 // stream before Express sees it. When express.json() then tries to read the
 // already-consumed stream it throws a 400 "Bad Request" error.
 //
-// Fix: wrap express.json() so that parse errors on an empty/consumed stream
-// are silently swallowed instead of crashing the request pipeline.
+// Fix: If Vercel already parsed the body (flagged by api/index.js wrapper),
+// skip express.json(). Otherwise parse normally, catching stream errors.
 const jsonParser = express.json({ limit: '10mb' });
 const urlencodedParser = express.urlencoded({ extended: true, limit: '10mb' });
 
 app.use((req, res, next) => {
-  // If body is already populated (Vercel pre-parsed it), skip.
-  if (req.body !== undefined && req.body !== null) {
+  // Vercel already parsed the body — req.body is set, stream is consumed.
+  if (req._vercelParsed || (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0)) {
     return next();
   }
-  // Try to parse; if the stream was consumed, swallow the error.
+  // Not on Vercel (or GET request) — parse normally, but catch stream errors.
   jsonParser(req, res, (err) => {
-    if (err) {
-      // If it's a body-parser error on an empty/consumed stream, ignore it.
-      // The body was likely pre-parsed by the hosting platform.
-      if (err.type === 'stream.not.readable' || err.status === 400) {
-        req.body = req.body || {};
-        return next();
-      }
-      return next(err);
+    if (err && (err.type === 'stream.not.readable' || err.status === 400)) {
+      req.body = req.body || {};
+      return next();
     }
+    if (err) return next(err);
     next();
   });
 });
 app.use((req, res, next) => {
-  if (req.body !== undefined && req.body !== null) {
+  if (req._vercelParsed || (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0)) {
     return next();
   }
   urlencodedParser(req, res, (err) => {
