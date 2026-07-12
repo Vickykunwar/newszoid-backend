@@ -24,6 +24,32 @@ const profileValidationBase = [
 ];
 
 // ============================================================
+// POST /api/biz-agent/profile/enrich
+// Research public business information and suggest local inputs
+// ============================================================
+router.post(
+    '/profile/enrich',
+    [
+        body('name')
+            .isString()
+            .trim()
+            .isLength({ min: 2, max: 100 })
+            .withMessage('Company or owner name must be 2-100 characters'),
+        body('city')
+            .isString()
+            .trim()
+            .isLength({ min: 2, max: 100 })
+            .withMessage('Location must be 2-100 characters'),
+        body('businessType').optional().isString().trim().isLength({ max: 150 }),
+        body('companyRole').optional().isString().trim().isLength({ max: 100 }),
+        body('items').optional().isArray({ max: 20 }),
+        body('items.*').optional().isString().trim().isLength({ max: 100 }),
+    ],
+    validate,
+    bizAgentController.enrichProfile
+);
+
+// ============================================================
 // POST /api/biz-agent/news
 // Fetch personalized business news based on profile
 // ============================================================

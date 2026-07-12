@@ -75,6 +75,14 @@ const rateSnapshotSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    // Set only after the server fetched the cited page and found both the
+    // requested item and quoted price. Historic AI-only records stay false
+    // and are excluded from comparison/alert calculations.
+    sourceVerified: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true }
 );

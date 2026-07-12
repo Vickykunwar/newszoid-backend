@@ -74,6 +74,9 @@ Required environment variables:
 NODE_ENV=production
 MONGO_URI=...
 GEMINI_API_KEY=...
+GROQ_API_KEY=...
+UPSTASH_REDIS_REST_URL=...
+UPSTASH_REDIS_REST_TOKEN=...
 FRONTEND_ORIGINS=https://newszoid.com,https://www.newszoid.com,https://newszoid.vercel.app
 SERVE_FRONTEND=false
 ```
@@ -83,6 +86,29 @@ After deploying, the backend health check should work at:
 ```text
 https://your-backend-project.vercel.app/api/health
 ```
+
+## Data and WhatsApp safeguards
+
+- Dashboard news is sourced from Google News RSS and is not AI-generated.
+- A market rate is shown only after its cited page was fetched and matched to
+  both the requested item and quoted price. When this check cannot be made,
+  the dashboard shows no new rate rather than an unverified value.
+- WhatsApp is **not** a daily briefing service by default. The Share button
+  creates a manual briefing. Do not claim automatic delivery until you have a
+  verified user opt-in flow, a WhatsApp provider, and the required provider
+  credentials configured server-side.
+
+If you later build an authenticated background worker, it can use the private
+`/api/whatsapp-alert` route. Set these only in the backend Vercel project:
+
+```text
+TWILIO_ACCOUNT_SID=...
+TWILIO_AUTH_TOKEN=...
+TWILIO_WA_NUMBER=whatsapp:+...
+WHATSAPP_ALERT_SECRET=<long-random-secret>
+```
+
+Never put these values in `FRONTEND/config.js` or browser JavaScript.
 
 ## DNS
 

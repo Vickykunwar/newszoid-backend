@@ -13,6 +13,8 @@ const compression = require('compression');
 
 // Import routes
 const bizAgentRoutes = require('./routes/bizAgent');
+const newsProxyRoutes = require('./routes/newsProxy');
+const whatsappAlertController = require('./controllers/whatsappAlertController');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -59,6 +61,9 @@ const corsOptions = {
 
     // allow server-to-server, curl, and same-origin requests
     if (!origin) return callback(null, true);
+
+    // Local file/PWA previews use the opaque "null" origin.
+    if (origin === 'null') return callback(null, true);
 
     // allow localhost always (can only come from the developer's machine)
     if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return callback(null, true);
@@ -127,6 +132,8 @@ if (process.env.MONGO_URI && process.env.NODE_ENV !== 'test') {
 // Routes
 console.log('🚀 Step 7: Registering Routes...');
 app.use('/api/biz-agent', bizAgentRoutes);
+app.use('/api/news-proxy', newsProxyRoutes);
+app.all('/api/whatsapp-alert', whatsappAlertController.handler);
 console.log('✅ Step 8: Routes Registered');
 
 // Static files
