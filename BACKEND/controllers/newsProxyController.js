@@ -68,19 +68,13 @@ async function fetchGoogleNewsRss({ industry = '', city = '', materials = '' } =
     .filter(Boolean)
     .slice(0, 12);
 
-  // Cap query length so a hostile/oversized request can't build a huge URL.
-  const querySeed = [
-    normalizedIndustry,
-    materialsList.slice(0, 4).join(' '),
-    'business',
-    'India',
-    normalizedCity,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .slice(0, 200);
+  const searchQueries = buildSearchQueries({
+    industry: normalizedIndustry,
+    city: normalizedCity,
+    materials: materialsList,
+  });
 
-  if (!querySeed) {
+  if (!searchQueries.length) {
     return { news: [], provider: 'rss-proxy-failed', cached: false, invalidQuery: true };
   }
 
@@ -92,58 +86,98 @@ async function fetchGoogleNewsRss({ industry = '', city = '', materials = '' } =
     return { news: cached, provider: 'rss-proxy', cached: true };
   }
 
-  const query = encodeURIComponent(querySeed);
-  const rssUrl = `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
+  let lastError = null;
+  let receivedResponse = false;
+  const queryDeadline = Date.now() + 5000;
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-    let response;
+  // A fully-specific query often has zero Google News results (for example,
+  // an industry + five materials + city). Try the exact query first, then a
+  // broader industry/material market query so a healthy feed does not look
+  // like an outage to the dashboard.
+  for (const querySeed of searchQueries) {
+    const timeRemaining = queryDeadline - Date.now();
+    if (timeRemaining <= 0) break;
+
+    const query = encodeURIComponent(querySeed);
+    const rssUrl = `https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
+
     try {
-      response = await fetch(rssUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NewszoidBot/1.0)' },
-        signal: controller.signal,
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), Math.min(3500, timeRemaining));
+      let response;
+      try {
+        response = await fetch(rssUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; NewszoidBot/1.0)' },
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      if (!response.ok) {
+        throw new Error(`RSS fetch failed: ${response.status}`);
+      }
+
+      receivedResponse = true;
+      const itemsList = parseRssXml(await response.text()).slice(0, 15).map(item => {
+        const headline = sanitizeText(item.title);
+        const source = sanitizeText(item.source || 'Google News');
+        const link = sanitizeExternalUrl(item.link);
+
+        return {
+          headline,
+          summary: headline, // RSS <item> has no summary; never invent one.
+          source,
+          link,
+          url: link,
+          time: item.pubDate,
+          category: categorize(item.title),
+          impact: classifyImpact(item.title),
+          sentiment: classifySentiment(item.title),
+          signal: `Read more from ${source}`,
+          relevantItem: findRelevantItem(item.title, materialsList),
+        };
       });
-    } finally {
-      clearTimeout(timeout);
+
+      if (itemsList.length) {
+        proxyCache.set(cacheKey, itemsList);
+        return { news: itemsList, provider: 'rss-proxy', cached: false };
+      }
+    } catch (error) {
+      lastError = error;
+      console.error('[News Proxy] Failed:', error.message);
     }
-
-    if (!response.ok) {
-      throw new Error(`RSS fetch failed: ${response.status}`);
-    }
-
-    const xml = await response.text();
-    const itemsList = parseRssXml(xml).slice(0, 15).map(item => {
-      const headline = sanitizeText(item.title);
-      const source = sanitizeText(item.source || 'Google News');
-      const link = sanitizeExternalUrl(item.link);
-
-      return {
-        headline,
-        summary: headline, // RSS <item> has no summary; never invent one.
-        source,
-        link,
-        url: link,
-        time: item.pubDate,
-        category: categorize(item.title),
-        impact: classifyImpact(item.title),
-        sentiment: classifySentiment(item.title),
-        signal: `Read more from ${source}`,
-        relevantItem: findRelevantItem(item.title, materialsList),
-      };
-    });
-
-    proxyCache.set(cacheKey, itemsList);
-    return { news: itemsList, provider: 'rss-proxy', cached: false };
-  } catch (error) {
-    console.error('[News Proxy] Failed:', error.message);
-    return {
-      news: [],
-      provider: 'rss-proxy-failed',
-      cached: false,
-      error: 'News feed temporarily unavailable',
-    };
   }
+
+  if (receivedResponse) {
+    return { news: [], provider: 'rss-proxy', cached: false };
+  }
+
+  return {
+    news: [],
+    provider: 'rss-proxy-failed',
+    cached: false,
+    error: lastError ? 'News feed temporarily unavailable' : undefined,
+  };
+}
+
+function buildSearchQueries({ industry = '', city = '', materials = [] } = {}) {
+  const normalizedIndustry = String(industry || '').trim();
+  const normalizedCity = String(city || '').trim();
+  const materialsList = (Array.isArray(materials) ? materials : [])
+    .map(material => String(material || '').trim())
+    .filter(Boolean);
+  const subject = normalizedIndustry || materialsList.slice(0, 2).join(' ');
+
+  const candidates = [
+    [normalizedIndustry, materialsList.slice(0, 2).join(' '), 'business India', normalizedCity]
+      .filter(Boolean)
+      .join(' '),
+    [subject, 'market India'].filter(Boolean).join(' '),
+    [materialsList[0], 'market India'].filter(Boolean).join(' '),
+  ];
+
+  return [...new Set(candidates.map(query => query.slice(0, 200)).filter(Boolean))];
 }
 
 // Exposed for unit testing.
@@ -157,6 +191,7 @@ exports._internal = {
   classifyImpact,
   classifySentiment,
   findRelevantItem,
+  buildSearchQueries,
 };
 
 // ─── Minimal, dependency-free XML parser for RSS <item> blocks ───
