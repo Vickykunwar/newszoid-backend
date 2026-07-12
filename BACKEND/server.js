@@ -128,13 +128,31 @@ app.use((req, res, next) => {
   next();
 });
 
-// Database Connection (Background)
-if (process.env.MONGO_URI && process.env.NODE_ENV !== 'test') {
-  console.log('🔌 Step 5: Attempting to connect to MongoDB...');
-  mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log('✅ Step 6: MongoDB Connected'))
-    .catch(err => console.error('❌ Step 6: MongoDB Error:', err.message));
-}
+// Database Connection Middleware for Serverless
+let isConnected = false;
+app.use(async (req, res, next) => {
+  if (req.path === '/api/health') return next();
+  
+  if (isConnected || mongoose.connection.readyState === 1) {
+    isConnected = true;
+    return next();
+  }
+
+  if (process.env.MONGO_URI && process.env.NODE_ENV !== 'test') {
+    try {
+      console.log('🔌 Connecting to MongoDB...');
+      await mongoose.connect(process.env.MONGO_URI, {
+        serverSelectionTimeoutMS: 5000,
+      });
+      isConnected = true;
+      console.log('✅ MongoDB Connected');
+    } catch (err) {
+      console.error('❌ MongoDB Connection Error:', err.message);
+      return res.status(500).json({ ok: false, error: 'Database connection failed' });
+    }
+  }
+  next();
+});
 
 // Routes
 console.log('🚀 Step 7: Registering Routes...');
