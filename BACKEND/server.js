@@ -101,12 +101,18 @@ const limiter = rateLimit({
 });
 
 app.get('/api/health', (req, res) => {
-  const databaseStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+  const readyState = mongoose.connection.readyState;
+  let databaseStatus = 'disconnected';
+  if (readyState === 1) databaseStatus = 'connected';
+  else if (readyState === 2) databaseStatus = 'connecting';
+  
   res.status(200).json({
     ok: true,
     status: 'online',
     database: databaseStatus,
     mongodb: databaseStatus,
+    readyState: readyState,
+    hasMongoUri: !!process.env.MONGO_URI,
     timestamp: new Date().toISOString(),
   });
 });
