@@ -5,7 +5,7 @@ const businessProfileSchema = new mongoose.Schema(
         userId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
-            required: false, // Optional for unauthenticated users initially, but ready for Phase 3 integration
+            required: [true, 'A profile owner is required'],
         },
         ownerName: {
             type: String,

@@ -66,7 +66,7 @@ Output Directory: leave empty
 Install Command:  npm install
 ```
 
-The Vercel serverless entry point is `api/[...path].js`, which imports the existing Express app from `BACKEND/server.js`.
+The Vercel serverless entry point is `api/index.js`, which imports the existing Express app from `BACKEND/server.js`. The root `vercel.json` provides the API rewrite; `FRONTEND/vercel.json` is intentionally separate because the frontend is a separate Vercel project and owns its cache headers.
 
 Required environment variables:
 
@@ -77,6 +77,8 @@ GEMINI_API_KEY=...
 GROQ_API_KEY=...
 UPSTASH_REDIS_REST_URL=...
 UPSTASH_REDIS_REST_TOKEN=...
+JWT_SECRET=<random secret of at least 32 characters>
+JWT_EXPIRES_IN=7d
 FRONTEND_ORIGINS=https://newszoid.com,https://www.newszoid.com,https://newszoid.vercel.app
 SERVE_FRONTEND=false
 ```
@@ -131,8 +133,10 @@ After deployment:
 2. Open https://newszoid.com/robots.txt.
 3. Open https://newszoid.com/sitemap.xml and confirm it contains the canonical URL.
 4. Open https://api.newszoid.com/api/health and confirm ok=true.
-5. In the browser dev tools, confirm API calls go to https://api.newszoid.com.
-6. If the UI looks stale after deploy, unregister the old service worker once and refresh.
+5. POST a valid signed-in profile to https://api.newszoid.com/api/biz-agent/profile and confirm it is not a platform 404.
+6. Open https://api.newszoid.com/api/news-proxy and confirm it is not a platform 404.
+7. In the browser dev tools, confirm API calls go to https://api.newszoid.com.
+8. If the UI looks stale after deploy, unregister the old service worker once and refresh.
 ```
 
 ## Local Checks
@@ -144,14 +148,14 @@ npm test
 npm run lint
 ```
 
-The backend reads `.env` from the repo root. Use `.env.example` or `BACKEND/.env.example` as the template, then keep the real `.env` private.
+The backend reads `.env` from the repo root. Use the root `.env.example` as the template, then keep the real `.env` private.
 
 ## GitHub Push Checklist
 
 Before pushing to GitHub, make sure these files/folders are included:
 
 ```text
-api/[...path].js
+api/index.js
 BACKEND/
 FRONTEND/
 package.json

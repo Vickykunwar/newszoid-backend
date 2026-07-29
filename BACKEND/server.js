@@ -14,8 +14,9 @@ const compression = require('compression');
 // Import routes
 const bizAgentRoutes = require('./routes/bizAgent');
 const newsProxyRoutes = require('./routes/newsProxy');
+const authRoutes = require('./routes/auth');
+const briefRoutes = require('./routes/brief');
 const whatsappAlertController = require('./controllers/whatsappAlertController');
-const briefController = require('./controllers/briefController');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -169,8 +170,20 @@ app.use((req, res, next) => {
 
 // Database Connection Middleware for Serverless
 let isConnected = false;
+const databaseRequiredPaths = new Set([
+  '/api/auth/signup',
+  '/api/auth/login',
+  '/api/auth/me',
+  '/api/biz-agent/profile',
+  '/api/biz-agent/rate-history',
+]);
+
 app.use(async (req, res, next) => {
-  if (req.path === '/api/health') return next();
+  // News, AI briefs, and live rates can operate without MongoDB. Keeping
+  // them independent prevents a temporary database outage from blanking the
+  // dashboard. Database-backed profile saving and price history still require
+  // a connection and are handled here.
+  if (!databaseRequiredPaths.has(req.path)) return next();
   
   if (isConnected || mongoose.connection.readyState === 1) {
     isConnected = true;
@@ -196,9 +209,10 @@ app.use(async (req, res, next) => {
 // Routes
 console.log('🚀 Step 7: Registering Routes...');
 app.use('/api/biz-agent', bizAgentRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/news-proxy', newsProxyRoutes);
 app.all('/api/whatsapp-alert', whatsappAlertController.handler);
-app.post('/api/brief', briefController);
+app.use('/api/brief', briefRoutes);
 console.log('✅ Step 8: Routes Registered');
 
 // Static files

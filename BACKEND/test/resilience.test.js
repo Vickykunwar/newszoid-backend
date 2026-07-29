@@ -20,17 +20,19 @@ describe('AI resilience router', () => {
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
 
-    const { getAIResponse } = require('../../lib/ai-router');
-    const result = await getAIResponse('ignored', {
-      businessName: 'Example Metals',
-      rates: [
-        { item: 'HR Coil', deltaPercent: 4.5 },
-        { item: 'Copper Wire', deltaPercent: -3.2 },
-      ],
-      news: [
-        { headline: 'Government subsidy scheme opens for MSME manufacturers' },
-        { title: 'Import duty on steel raised' },
-      ],
+    const { callAIWithFallback } = require('../controllers/bizAgentController');
+    const result = await callAIWithFallback('ignored', 'ignored', {
+      context: {
+        businessName: 'Example Metals',
+        rates: [
+          { item: 'HR Coil', deltaPercent: 4.5 },
+          { item: 'Copper Wire', deltaPercent: -3.2 },
+        ],
+        news: [
+          { headline: 'Government subsidy scheme opens for MSME manufacturers' },
+          { title: 'Import duty on steel raised' },
+        ],
+      },
     });
 
     expect(result).toMatchObject({ provider: 'rule-engine', bothAiFailed: true });
@@ -43,13 +45,13 @@ describe('AI resilience router', () => {
 
 describe('brief endpoint', () => {
   test('passes rate/news context to the router and returns sanitized brief HTML', async () => {
-    const getAIResponse = jest.fn().mockResolvedValue({
+    const callAIWithFallback = jest.fn().mockResolvedValue({
       text: '<h2>Update</h2><p>Safe</p><script>alert(1)</script>',
       provider: 'rule-engine',
       bothAiFailed: true,
     });
-    jest.doMock('../../lib/ai-router', () => ({ getAIResponse }));
-    const handler = require('../../api/brief');
+    jest.doMock('../controllers/bizAgentController', () => ({ callAIWithFallback }));
+    const handler = require('../controllers/briefController');
     const res = {
       status: jest.fn().mockReturnThis(),
       json: jest.fn(),
@@ -69,7 +71,7 @@ describe('brief endpoint', () => {
       res
     );
 
-    expect(getAIResponse.mock.calls[0][1]).toMatchObject({
+    expect(callAIWithFallback.mock.calls[0][2].context).toMatchObject({
       rates: [{ item: 'HR Coil', deltaPercent: 4.5 }],
       news: [{ headline: 'Import duty on steel raised' }],
     });

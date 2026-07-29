@@ -1,9 +1,13 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const NodeCache = require('node-cache');
 const sanitizeHtml = require('sanitize-html');
+const mongoose = require('mongoose');
+const dns = require('dns').promises;
+const net = require('net');
 const BusinessProfile = require('../models/BusinessProfile');
 const RateSnapshot = require('../models/RateSnapshot');
 const { fetchGoogleNewsRss } = require('./newsProxyController');
+const { candidateUrlsForItem, fetchConsensusRate } = require('./rateConsensusController');
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const GEMINI_MODEL_CANDIDATES = (
@@ -23,17 +27,9 @@ const GROQ_MODEL_CANDIDATES = (
   .map(model => model.trim())
   .filter(Boolean);
 
-// Keep all backend AI calls in the same Gemini-first failover order.
-const REQUESTED_AI_STRATEGY = process.env.AI_STRATEGY;
-const AI_STRATEGY = 'gemini-first';
-
-if (REQUESTED_AI_STRATEGY && REQUESTED_AI_STRATEGY !== AI_STRATEGY) {
-  console.warn(`Ignoring AI_STRATEGY=${REQUESTED_AI_STRATEGY}; Newszoid uses Gemini-first failover.`);
-}
-
 if (GROQ_API_KEY) {
   console.log(`✅ Groq AI configured with models: ${GROQ_MODEL_CANDIDATES.join(', ')}`);
-  console.log(`   AI Strategy: ${AI_STRATEGY}`);
+  console.log('   AI strategy: Gemini first, then Groq');
 } else {
   console.warn('⚠️  GROQ_API_KEY not set — Groq disabled, using Gemini only');
 }
@@ -42,6 +38,9 @@ const newsCache = new NodeCache({ stdTTL: 1800 });
 const ratesCache = new NodeCache({ stdTTL: 900 });
 const analystCache = new NodeCache({ stdTTL: 7200 });
 const profileResearchCache = new NodeCache({ stdTTL: 86400 });
+const aiResponseCache = new NodeCache({ stdTTL: 7200, useClones: false });
+let redisClient;
+let redisInitialized = false;
 
 const ALERT_THRESHOLDS = {
   highPercent: 5,
@@ -184,6 +183,65 @@ function sanitizeSourceUrl(value) {
   }
 }
 
+function isPrivateOrLoopback(address) {
+  const family = net.isIP(address);
+  if (!family) return true;
+
+  if (family === 4) {
+    const [a, b] = address.split('.').map(Number);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    );
+  }
+
+  const normalized = address.toLowerCase();
+  if (normalized === '::' || normalized === '::1' || normalized.startsWith('fe80:')) return true;
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
+  const mappedIpv4 = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  return Boolean(mappedIpv4 && isPrivateOrLoopback(mappedIpv4[1]));
+}
+
+async function isSafeHost(hostname, lookup = dns.lookup) {
+  if (!hostname || hostname.toLowerCase() === 'localhost') return false;
+  try {
+    const addresses = await lookup(hostname, { all: true, verbatim: true });
+    return Array.isArray(addresses) && addresses.length > 0 && addresses.every(({ address }) => !isPrivateOrLoopback(address));
+  } catch (error) {
+    console.warn(`[Rates] DNS lookup failed for ${hostname}: ${error.message}`);
+    return false;
+  }
+}
+
+async function fetchSafeSource(sourceUrl, options) {
+  let nextUrl = sourceUrl;
+  for (let redirects = 0; redirects <= 3; redirects += 1) {
+    const parsed = new URL(nextUrl);
+    if (!(await isSafeHost(parsed.hostname))) {
+      console.warn(`[Rates] Blocked unsafe source host: ${parsed.hostname}`);
+      return null;
+    }
+
+    const response = await fetch(nextUrl, { ...options, redirect: 'manual' });
+    if (response.status < 300 || response.status >= 400) return { response, finalUrl: nextUrl };
+
+    const location = response.headers.get('location');
+    const redirectedUrl = location ? sanitizeSourceUrl(new URL(location, nextUrl).toString()) : '';
+    if (!redirectedUrl) return null;
+    nextUrl = redirectedUrl;
+  }
+
+  console.warn('[Rates] Blocked source with too many redirects');
+  return null;
+}
+
 function sourcePageMentionsRate(pageText, item, currentPrice) {
   const normalizedText = String(pageText || '').toLowerCase();
   const itemTokens = normalizeItemKey(item)
@@ -219,15 +277,15 @@ async function verifyRateSource(rate) {
   const timeout = setTimeout(() => controller.abort(), 4000);
 
   try {
-    const response = await fetch(sourceUrl, {
+    const fetchResult = await fetchSafeSource(sourceUrl, {
       headers: {
         Accept: 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.1',
         'User-Agent': 'Mozilla/5.0 (compatible; NewszoidRateVerifier/1.0)',
       },
       signal: controller.signal,
-      redirect: 'follow',
     });
-    const finalUrl = sanitizeSourceUrl(response.url || sourceUrl);
+    if (!fetchResult) return null;
+    const { response, finalUrl } = fetchResult;
     const contentLength = Number(response.headers.get('content-length') || 0);
 
     if (!response.ok || !finalUrl || (contentLength && contentLength > 1500000)) {
@@ -448,10 +506,16 @@ async function normalizeRatesResponse(raw, requestedItems, city) {
         sourceDate: String(entry.sourceDate || '').trim(),
       };
     })
-    .filter(Boolean)
-    .slice(0, requestedItems.length);
+    .filter(Boolean);
 
-  const verifiedRates = await Promise.all(candidates.map(verifyRateSource));
+  const seen = new Set();
+  const deduped = candidates.filter(candidate => {
+    if (seen.has(candidate.itemKey)) return false;
+    seen.add(candidate.itemKey);
+    return true;
+  });
+
+  const verifiedRates = await Promise.all(deduped.slice(0, requestedItems.length).map(verifyRateSource));
   return verifiedRates.filter(Boolean);
 }
 
@@ -480,6 +544,8 @@ async function buildTrackedRates({ businessType, city, items, fetchedRates }) {
           market: rate.market,
           note: rate.note,
           confidence: rate.confidence,
+          agreementCount: rate.agreementCount || 0,
+          totalSourcesChecked: rate.totalSourcesChecked || 0,
           sourceName: rate.sourceName,
           sourceUrl: rate.sourceUrl,
           sourceDate: rate.sourceDate,
@@ -533,6 +599,11 @@ async function buildTrackedRates({ businessType, city, items, fetchedRates }) {
         market: rate.market,
         note: rate.note,
         confidence: previousSnapshot ? rate.confidence : 'LOW',
+        consensusConfidence: rate.consensusConfidence || '',
+        consensusPrice: rate.consensusPrice || null,
+        agreementCount: rate.agreementCount || 0,
+        totalSourcesChecked: rate.totalSourcesChecked || 0,
+        agreeingSources: rate.agreeingSources || [],
         sourceName: rate.sourceName,
         sourceUrl: rate.sourceUrl,
         sourceDate: rate.sourceDate,
@@ -553,15 +624,69 @@ async function buildTrackedRates({ businessType, city, items, fetchedRates }) {
   return trackedRates;
 }
 
+// Preserve live, source-verified quotes when MongoDB is unavailable. These
+// quotes deliberately carry no fabricated history or trend; the next request
+// will resume tracked comparisons automatically once the database reconnects.
+function buildUntrackedRates(fetchedRates) {
+  const now = new Date();
+  const todayKey = snapshotDateKey();
+
+  return fetchedRates.map(rate => {
+    const history = [
+      {
+        date: todayKey,
+        rate: rate.currentPrice,
+        source: rate.sourceName || '',
+      },
+    ];
+    const historyStats = buildHistoryStats(history);
+    const deltaInfo = computeDelta(rate.currentPrice, rate.currentPrice);
+    const alert = buildPriceAlert({
+      rate,
+      deltaInfo,
+      previousSnapshot: null,
+      historyStats,
+      now,
+    });
+
+    return {
+      item: rate.item,
+      itemKey: rate.itemKey,
+      unit: rate.unit,
+      currentPrice: rate.currentPrice,
+      prevPrice: rate.currentPrice,
+      delta: 0,
+      deltaPercent: 0,
+      trend: 'FLAT',
+      market: rate.market,
+      note: rate.note,
+      confidence: rate.confidence,
+      consensusConfidence: rate.consensusConfidence || '',
+      consensusPrice: rate.consensusPrice || null,
+      agreementCount: rate.agreementCount || 0,
+      totalSourcesChecked: rate.totalSourcesChecked || 0,
+      agreeingSources: rate.agreeingSources || [],
+      sourceName: rate.sourceName,
+      sourceUrl: rate.sourceUrl,
+      sourceDate: rate.sourceDate,
+      fetchedAt: now.toISOString(),
+      snapshotDate: todayKey,
+      comparisonLabel: 'Current source-verified quote; history temporarily unavailable',
+      history,
+      historyStats,
+      alert,
+      sourceVerified: rate.sourceVerified === true,
+      verified: rate.sourceVerified === true,
+    };
+  });
+}
+
 function sanitizeOutput(htmlStr) {
   if (!htmlStr) return htmlStr;
 
   return sanitizeHtml(htmlStr, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'h1', 'h2', 'span']),
-    allowedAttributes: {
-      ...sanitizeHtml.defaults.allowedAttributes,
-      '*': ['class', 'style'],
-    },
+    allowedTags: ['h2', 'h3', 'p', 'ul', 'ol', 'li', 'strong', 'em', 'br'],
+    allowedAttributes: {},
   });
 }
 
@@ -870,13 +995,23 @@ async function callAI(systemPrompt, userPrompt, { useSearch = false } = {}) {
     return geminiCall();
   }
 
-  if (AI_STRATEGY === 'parallel') {
+  // Gemini-first is the only supported order. Groq is a non-search fallback.
+  try {
+    return await geminiCall();
+  } catch (geminiErr) {
+    console.warn(`Gemini failed (${geminiErr.message}), falling back to Groq...`);
+    return groqCall();
+  }
+
+  /* Removed legacy configurable strategy branches. Gemini-first above is canonical.
+  // The previous parallel and Groq-first branches were intentionally removed.
+  if (false) {
     // Race both providers — fastest valid response wins
     return firstSuccessfulProvider([
       { provider: 'gemini', call: geminiCall },
       { provider: 'groq', call: groqCall },
     ]);
-  } else if (AI_STRATEGY === 'groq-first') {
+  } else if (false) {
     try {
       return await groqCall();
     } catch (groqErr) {
@@ -893,6 +1028,7 @@ async function callAI(systemPrompt, userPrompt, { useSearch = false } = {}) {
       return await groqCall();
     }
   }
+  */
 }
 
 // Backward-compatible wrappers (used by routes/bizAgent.js)
@@ -958,15 +1094,65 @@ function generateRuleBasedAnalysis(context = {}) {
 // exception here means the entire AI layer is down. Returns a result object so
 // callers (and the frontend) can detect that state and fall back to raw RSS.
 async function callAIWithFallback(systemPrompt, userPrompt, options = {}) {
-  const { useSearch = false, context = {} } = options;
+  const { useSearch = false, context = {}, cacheKey: requestedCacheKey } = options;
+  const key = requestedCacheKey ? `ai:${requestedCacheKey}` : '';
+  const cached = key ? await getCachedAiResponse(key) : null;
+  if (cached) {
+    return { text: cached, provider: 'cache', bothAiFailed: false, suggestRssFallback: false };
+  }
+
   try {
     const text = await callAI(systemPrompt, userPrompt, { useSearch });
+    if (key) await cacheAiResponse(key, text);
     return { text, provider: 'ai', bothAiFailed: false, suggestRssFallback: false };
   } catch (err) {
     console.error('[AI Router] All AI providers failed:', err.message);
     console.warn('[AI Router] Falling back to rule-based engine (no API key needed).');
     const text = generateRuleBasedAnalysis(context);
     return { text, provider: 'rule-engine', bothAiFailed: true, suggestRssFallback: true };
+  }
+}
+
+function getRedisClient() {
+  if (redisInitialized) return redisClient;
+  redisInitialized = true;
+  if (!process.env.UPSTASH_REDIS_REST_URL || !process.env.UPSTASH_REDIS_REST_TOKEN) return null;
+
+  try {
+    const { Redis } = require('@upstash/redis');
+    redisClient = Redis.fromEnv();
+  } catch (error) {
+    console.warn(`[AI Router] Redis initialization failed: ${error.message}`);
+    redisClient = null;
+  }
+  return redisClient;
+}
+
+async function getCachedAiResponse(key) {
+  const memoryValue = aiResponseCache.get(key);
+  if (typeof memoryValue === 'string' && memoryValue) return memoryValue;
+
+  try {
+    const redis = getRedisClient();
+    const value = redis ? await redis.get(key) : null;
+    if (typeof value === 'string' && value) {
+      aiResponseCache.set(key, value);
+      return value;
+    }
+  } catch (error) {
+    console.warn(`[AI Router] Cache read failed: ${error.message}`);
+  }
+  return null;
+}
+
+async function cacheAiResponse(key, text) {
+  if (typeof text !== 'string' || !text) return;
+  aiResponseCache.set(key, text);
+  try {
+    const redis = getRedisClient();
+    if (redis) await redis.set(key, text, { ex: 7200 });
+  } catch (error) {
+    console.warn(`[AI Router] Cache write failed: ${error.message}`);
   }
 }
 
@@ -1071,15 +1257,49 @@ Return only the JSON array with no markdown and no explanation.`;
 
     const raw = await callGeminiWithSearch(systemPrompt, userPrompt);
     const fetchedRates = await normalizeRatesResponse(raw, items, city);
+    await Promise.all(
+      fetchedRates.map(async rate => {
+        const consensus = await fetchConsensusRate(rate.item, candidateUrlsForItem(rate.item), {
+          aiReferee: callAI,
+        });
+
+        rate.agreementCount = consensus.agreementCount;
+        rate.totalSourcesChecked = consensus.totalSourcesChecked;
+        rate.agreeingSources = consensus.agreeingSources;
+        rate.confidence = consensus.confidence;
+        rate.consensusConfidence = consensus.confidence;
+        rate.consensusPrice = consensus.price;
+        rate.note = consensus.price
+          ? `${rate.note} Multi-source consensus: ${consensus.agreementCount}/${consensus.totalSourcesChecked} sources agree.`.trim()
+          : rate.note;
+      })
+    );
     console.log(`Source-verified rates: ${fetchedRates.length}/${items.length}`);
 
     if (fetchedRates.length > 0) {
-      const trackedRates = await buildTrackedRates({
-        businessType,
-        city,
-        items,
-        fetchedRates,
-      });
+      let trackedRates;
+      let comparisonMode = 'tracked-history';
+      let persistenceWarning = '';
+
+      if (mongoose.connection.readyState !== 1) {
+        trackedRates = buildUntrackedRates(fetchedRates);
+        comparisonMode = 'current-quote';
+        persistenceWarning = 'Price history is temporarily unavailable; showing current source-verified quotes.';
+      } else {
+        try {
+          trackedRates = await buildTrackedRates({
+            businessType,
+            city,
+            items,
+            fetchedRates,
+          });
+        } catch (persistenceError) {
+          console.warn('[Rates] History storage unavailable; returning current quotes:', persistenceError.message);
+          trackedRates = buildUntrackedRates(fetchedRates);
+          comparisonMode = 'current-quote';
+          persistenceWarning = 'Price history is temporarily unavailable; showing current source-verified quotes.';
+        }
+      }
 
       console.log(`Rates tracked after normalization: ${trackedRates.length}/${items.length}`);
 
@@ -1089,8 +1309,9 @@ Return only the JSON array with no markdown and no explanation.`;
           notifications: buildNotificationSummary(trackedRates),
           meta: {
             snapshotDate: snapshotDateKey(),
-            comparisonMode: 'tracked-history',
+            comparisonMode,
             fetchedAt: new Date().toISOString(),
+            ...(persistenceWarning ? { warning: persistenceWarning } : {}),
           },
         };
 
@@ -1405,25 +1626,40 @@ Never invent facts, source URLs, registrations, addresses, or ownership links. R
 exports.saveProfile = async (req, res) => {
   try {
     const { name, email, gstin, city, businessType, items = [] } = req.body;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ ok: false, error: 'Authentication required' });
 
-    let profile = null;
-
-    if (email) {
-      profile = await BusinessProfile.findOne({ email });
-    }
+    // Profiles are identified only by the authenticated account, never by a
+    // client-submitted email address.
+    let profile = await BusinessProfile.findOne({ userId });
 
     if (profile) {
+      if (String(profile.userId) !== String(userId)) {
+        return res.status(403).json({ ok: false, error: 'You do not own this profile' });
+      }
       profile.ownerName = name;
-      profile.gstin = gstin;
+      profile.email = req.user.email;
+      profile.gstin = gstin || '';
       profile.city = city;
       profile.businessType = businessType;
       profile.items = items;
       await profile.save();
     } else {
+      // Do not silently attach an unowned legacy record just because the
+      // browser supplied its email. The migration script establishes that
+      // ownership explicitly before authenticated writes begin.
+      const legacyOrForeign = await BusinessProfile.findOne({ email: req.user.email });
+      if (legacyOrForeign) {
+        return res.status(403).json({
+          ok: false,
+          error: 'This email is linked to a profile whose ownership has not been migrated',
+        });
+      }
       profile = await BusinessProfile.create({
+        userId,
         ownerName: name,
-        email,
-        gstin,
+        email: req.user.email,
+        gstin: gstin || '',
         city,
         businessType,
         items,
@@ -1449,6 +1685,10 @@ exports.callAIWithFallback = callAIWithFallback;
 exports.generateRuleBasedAnalysis = generateRuleBasedAnalysis;
 exports._internal = {
   sanitizeSourceUrl,
+  isPrivateOrLoopback,
+  isSafeHost,
+  verifyRateSource,
   sourcePageMentionsRate,
   normalizeRatesResponse,
+  buildUntrackedRates,
 };

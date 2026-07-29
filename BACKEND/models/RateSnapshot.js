@@ -60,6 +60,16 @@ const rateSnapshotSchema = new mongoose.Schema(
       enum: ['HIGH', 'MEDIUM', 'LOW'],
       default: 'LOW',
     },
+    agreementCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    totalSourcesChecked: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     sourceName: {
       type: String,
       default: '',

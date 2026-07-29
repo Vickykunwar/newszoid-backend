@@ -1,5 +1,5 @@
 // routes/newsProxy.js - Self-hosted RSS proxy (replaces rss2json.com)
-// GET /api/news-proxy?industry=&city=&materials=
+// GET /api/news-proxy?industry=&city=&materials=&topic=&fresh=1
 const express = require('express');
 const router = express.Router();
 const { query, validationResult } = require('express-validator');
@@ -21,6 +21,8 @@ router.get(
     query('industry').optional().isString().trim().isLength({ max: 150 }),
     query('city').optional().isString().trim().isLength({ max: 100 }),
     query('materials').optional().isString().trim().isLength({ max: 300 }),
+    query('topic').optional().isString().trim().isLength({ max: 200 }),
+    query('fresh').optional().equals('1'),
   ],
   validate,
   newsProxyController.fetchNewsProxy

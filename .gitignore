@@ -5,7 +5,6 @@ coverage/
 .env
 .env.*
 !.env.example
-!BACKEND/.env.example
 
 .vercel/
 npm-debug.log*

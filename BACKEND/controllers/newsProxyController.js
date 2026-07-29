@@ -33,16 +33,18 @@ exports.fetchNewsProxy = async (req, res) => {
     industry: req.query.industry,
     city: req.query.city,
     materials: req.query.materials,
+    topic: req.query.topic,
+    bypassCache: req.query.fresh === '1',
   });
 
   if (result.invalidQuery) {
     return res.status(400).json({
       ok: false,
-      error: 'At least one of industry, city, or materials is required.',
+      error: 'At least one of industry, city, materials, or topic is required.',
     });
   }
 
-  res.setHeader('Cache-Control', RSS_CACHE_CONTROL);
+  res.setHeader('Cache-Control', req.query.fresh === '1' ? 'no-store' : RSS_CACHE_CONTROL);
   // A failed RSS request deliberately returns an empty list: callers must
   // fall back to their clearly-labelled cache, never generated "news".
   return res.status(200).json({
@@ -59,9 +61,10 @@ exports.fetchNewsProxy = async (req, res) => {
  * dashboard news route, so the primary feed cannot be replaced by an AI
  * generated article when a model is unavailable or wrong.
  */
-async function fetchGoogleNewsRss({ industry = '', city = '', materials = '' } = {}) {
+async function fetchGoogleNewsRss({ industry = '', city = '', materials = '', topic = '', bypassCache = false } = {}) {
   const normalizedIndustry = String(industry || '').trim();
   const normalizedCity = String(city || '').trim();
+  const normalizedTopic = String(topic || '').trim().slice(0, 200);
   const materialsList = (Array.isArray(materials) ? materials.join(' ') : String(materials || ''))
     .split(/[,\s]+/)
     .map(material => material.trim())
@@ -72,17 +75,18 @@ async function fetchGoogleNewsRss({ industry = '', city = '', materials = '' } =
     industry: normalizedIndustry,
     city: normalizedCity,
     materials: materialsList,
+    topic: normalizedTopic,
   });
 
   if (!searchQueries.length) {
     return { news: [], provider: 'rss-proxy-failed', cached: false, invalidQuery: true };
   }
 
-  const cacheKey = [normalizedIndustry, normalizedCity, materialsList.join(',')]
+  const cacheKey = [normalizedIndustry, normalizedCity, materialsList.join(','), normalizedTopic]
     .map(part => String(part).toLowerCase().trim())
     .join('|');
   const cached = proxyCache.get(cacheKey);
-  if (cached && cached.length) {
+  if (!bypassCache && cached && cached.length) {
     return { news: cached, provider: 'rss-proxy', cached: true };
   }
 
@@ -119,25 +123,28 @@ async function fetchGoogleNewsRss({ industry = '', city = '', materials = '' } =
       }
 
       receivedResponse = true;
-      const itemsList = parseRssXml(await response.text()).slice(0, 15).map(item => {
-        const headline = sanitizeText(item.title);
-        const source = sanitizeText(item.source || 'Google News');
-        const link = sanitizeExternalUrl(item.link);
+      const itemsList = parseRssXml(await response.text())
+        .filter(item => isRecentPublishedItem(item.pubDate))
+        .slice(0, 15)
+        .map(item => {
+          const headline = sanitizeText(item.title);
+          const source = sanitizeText(item.source || 'Google News');
+          const link = sanitizeExternalUrl(item.link);
 
-        return {
-          headline,
-          summary: headline, // RSS <item> has no summary; never invent one.
-          source,
-          link,
-          url: link,
-          time: item.pubDate,
-          category: categorize(item.title),
-          impact: classifyImpact(item.title),
-          sentiment: classifySentiment(item.title),
-          signal: `Read more from ${source}`,
-          relevantItem: findRelevantItem(item.title, materialsList),
-        };
-      });
+          return {
+            headline,
+            summary: headline, // RSS <item> has no summary; never invent one.
+            source,
+            link,
+            url: link,
+            time: item.pubDate,
+            category: categorize(item.title),
+            impact: classifyImpact(item.title),
+            sentiment: classifySentiment(item.title),
+            signal: `Read more from ${source}`,
+            relevantItem: findRelevantItem(item.title, materialsList),
+          };
+        });
 
       if (itemsList.length) {
         proxyCache.set(cacheKey, itemsList);
@@ -161,9 +168,10 @@ async function fetchGoogleNewsRss({ industry = '', city = '', materials = '' } =
   };
 }
 
-function buildSearchQueries({ industry = '', city = '', materials = [] } = {}) {
+function buildSearchQueries({ industry = '', city = '', materials = [], topic = '' } = {}) {
   const normalizedIndustry = String(industry || '').trim();
   const normalizedCity = String(city || '').trim();
+  const normalizedTopic = String(topic || '').trim();
   const materialsList = (Array.isArray(materials) ? materials : [])
     .map(material => String(material || '').trim())
     .filter(Boolean);
@@ -177,7 +185,23 @@ function buildSearchQueries({ industry = '', city = '', materials = [] } = {}) {
     [materialsList[0], 'market India'].filter(Boolean).join(' '),
   ];
 
+  if (normalizedTopic) {
+    candidates.push(
+      [subject, normalizedTopic, 'India'].filter(Boolean).join(' '),
+      [normalizedTopic, 'India'].filter(Boolean).join(' ')
+    );
+  }
+
   return [...new Set(candidates.map(query => query.slice(0, 200)).filter(Boolean))];
+}
+
+function isRecentPublishedItem(value) {
+  const publishedAt = Date.parse(String(value || ''));
+  // Keep entries with an unreadable RSS date, but reject dated reports that
+  // are older than 45 days or implausibly far in the future.
+  if (!Number.isFinite(publishedAt)) return true;
+  const now = Date.now();
+  return publishedAt >= now - 45 * 24 * 60 * 60 * 1000 && publishedAt <= now + 24 * 60 * 60 * 1000;
 }
 
 // Exposed for unit testing.
@@ -186,6 +210,7 @@ exports._internal = {
   parseRssXml,
   extractTag,
   sanitizeText,
+  isRecentPublishedItem,
   sanitizeExternalUrl,
   categorize,
   classifyImpact,

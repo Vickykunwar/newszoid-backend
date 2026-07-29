@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
 const bizAgentController = require('../controllers/bizAgentController');
+const { requireAuth } = require('../middleware/requireAuth');
 
 // Generic validation middleware
 const validate = (req, res, next) => {
@@ -15,12 +16,12 @@ const validate = (req, res, next) => {
 
 // Common validation rules
 const profileValidationBase = [
-    body('businessType').isString().trim().notEmpty().withMessage('businessType is required'),
-    body('city').isString().trim().notEmpty().withMessage('city is required'),
-    body('items').isArray().withMessage('items must be an array of strings').optional(),
-    body('items.*').isString().trim(),
+    body('businessType').isString().trim().isLength({ min: 1, max: 150 }).withMessage('businessType is required and must be 150 characters or fewer'),
+    body('city').isString().trim().isLength({ min: 1, max: 100 }).withMessage('city is required and must be 100 characters or fewer'),
+    body('items').optional().isArray({ max: 20 }).withMessage('Max 20 items'),
+    body('items.*').optional().isString().trim().isLength({ min: 1, max: 100 }).withMessage('Each item must be 1-100 characters'),
     body('email').optional().isEmail().normalizeEmail(),
-    body('gstin').optional().isString().trim()
+    body('gstin').optional().isString().trim().isLength({ max: 15 })
 ];
 
 // ============================================================
@@ -108,10 +109,11 @@ router.post(
 router.post(
     '/profile',
     [
-        body('name').isString().trim().notEmpty().withMessage('Profile name is required'),
+        body('name').isString().trim().isLength({ min: 2, max: 100 }).withMessage('Profile name must be 2-100 characters'),
         ...profileValidationBase
     ],
     validate,
+    requireAuth,
     bizAgentController.saveProfile
 );
 
