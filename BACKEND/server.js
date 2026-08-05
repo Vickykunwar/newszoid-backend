@@ -177,32 +177,49 @@ const databaseRequiredPaths = new Set([
   '/api/biz-agent/profile',
   '/api/biz-agent/rate-history',
 ]);
+// Live rates still work without a database, but they must attempt a MongoDB
+// connection first so each verified quote can become tomorrow's history point.
+// If the database is briefly down we retain the current-quote fallback instead
+// of blanking the Markets screen.
+const databaseOptionalPaths = new Set(['/api/biz-agent/rates']);
+let databaseConnectionPromise = null;
 
-app.use(async (req, res, next) => {
-  // News, AI briefs, and live rates can operate without MongoDB. Keeping
-  // them independent prevents a temporary database outage from blanking the
-  // dashboard. Database-backed profile saving and price history still require
-  // a connection and are handled here.
-  if (!databaseRequiredPaths.has(req.path)) return next();
-  
+async function ensureDatabaseConnection() {
   if (isConnected || mongoose.connection.readyState === 1) {
     isConnected = true;
-    return next();
+    return true;
   }
 
-  if (process.env.MONGO_URI && process.env.NODE_ENV !== 'test') {
-    try {
-      console.log('🔌 Connecting to MongoDB...');
-      await mongoose.connect(process.env.MONGO_URI, {
-        serverSelectionTimeoutMS: 5000,
+  if (!process.env.MONGO_URI || process.env.NODE_ENV === 'test') return false;
+
+  if (!databaseConnectionPromise) {
+    databaseConnectionPromise = mongoose
+      .connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 5000 })
+      .then(() => {
+        isConnected = true;
+        console.log('✅ MongoDB Connected');
+        return true;
+      })
+      .catch(err => {
+        databaseConnectionPromise = null;
+        console.error('❌ MongoDB Connection Error:', err.message);
+        return false;
       });
-      isConnected = true;
-      console.log('✅ MongoDB Connected');
-    } catch (err) {
-      console.error('❌ MongoDB Connection Error:', err.message);
-      return res.status(500).json({ ok: false, error: 'Database connection failed' });
-    }
   }
+
+  return databaseConnectionPromise;
+}
+
+app.use(async (req, res, next) => {
+  const requiresDatabase = databaseRequiredPaths.has(req.path);
+  const canUseDatabase = databaseOptionalPaths.has(req.path);
+  if (!requiresDatabase && !canUseDatabase) return next();
+
+  const connected = await ensureDatabaseConnection();
+  if (requiresDatabase && !connected && process.env.NODE_ENV !== 'test') {
+    return res.status(503).json({ ok: false, error: 'Database connection failed' });
+  }
+
   next();
 });
 

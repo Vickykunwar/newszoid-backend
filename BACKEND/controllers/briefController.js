@@ -17,6 +17,17 @@ function compactText(value, maxLength) {
 }
 
 function normalizeBriefRate(rate) {
+  const history = Array.isArray(rate?.history)
+    ? rate.history
+        .slice(-3)
+        .map(point => ({
+          date: compactText(point?.date, 20),
+          price: Number.isFinite(Number(point?.rate)) ? Number(point.rate) : null,
+          source: compactText(point?.source, 80),
+        }))
+        .filter(point => point.price !== null)
+    : [];
+
   return {
     item: compactText(rate?.item || rate?.material || rate?.name, 100),
     currentPrice: compactText(rate?.currentPrice, 40),
@@ -25,6 +36,9 @@ function normalizeBriefRate(rate) {
       ? Number(rate.deltaPercent)
       : null,
     market: compactText(rate?.market || rate?.location, 100),
+    sourceName: compactText(rate?.sourceName, 100),
+    // Oldest -> newest, capped to 3 points (today, yesterday, day-before).
+    history,
   };
 }
 
@@ -69,8 +83,18 @@ module.exports = async function handler(req, res) {
       items: safeItems,
     };
 
-    const systemPrompt = `You are a senior business analyst at Newszoid. Create a polished morning briefing for a ${context.businessType} business in ${context.city}. Use ONLY the supplied rate and news evidence. Do not invent prices, sources, policy changes, or demand claims. Keep it under 220 words and return clean HTML only. Use exactly these sections: <h2>Market snapshot</h2>, <h2>What to watch</h2>, and <h2>Recommended action</h2>. Under each heading use one concise <p> or a short <ul>. Do not repeat the business name as a heading.`;
-    const userPrompt = `Create today's briefing from this verified context. If a section has no evidence, say that no verified update is available rather than guessing.\n\nTracked materials: ${JSON.stringify(safeItems)}\n\nCurrent rates: ${JSON.stringify(safeRates)}\n\nPublisher-backed news: ${JSON.stringify(safeNews)}`;
+    const systemPrompt = `You are a senior business analyst at Newszoid writing a morning briefing for a ${context.businessType} business in ${context.city}. Use ONLY the supplied rate history and news evidence — never invent prices, dates, sources, or reasons for a price move. Return clean HTML only, under 260 words, with exactly these sections in this order:
+<h2>Today's Rates</h2> — one <ul><li> per tracked material. Each line must state: material name, today's price, yesterday's price and day-before price if available (write "no prior snapshot yet" if history has fewer than 2 points), the % change, and a one-sentence WHY. The WHY must be drawn only from the supplied news array — pick the closest matching headline. If nothing in the news evidence plausibly explains the move, write exactly: "No verified reason in today's sources" — do not guess or generalize.
+<h2>What This Means For You</h2> — 1-2 sentences translating the rate moves into a business impact.
+<h2>Recommended Action</h2> — one concrete, time-bound action.
+Do not repeat the business name as a heading. Do not add a section if there is no rate or news data to support it — say so briefly instead.`;
+    const userPrompt = `Build today's briefing from this verified context only.
+
+Tracked materials: ${JSON.stringify(safeItems)}
+
+Rate history (oldest to newest per item, this is your ONLY source for today/yesterday/day-before prices): ${JSON.stringify(safeRates)}
+
+Publisher-backed news (this is your ONLY source for reasons): ${JSON.stringify(safeNews)}`;
     const contentHash = crypto
       .createHash('sha1')
       .update(JSON.stringify({ rates: safeRates, news: safeNews }))

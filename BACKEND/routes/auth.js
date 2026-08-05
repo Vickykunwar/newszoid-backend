@@ -14,8 +14,8 @@ const credentialsValidation = [
   body('email').isEmail().normalizeEmail().withMessage('A valid email is required'),
   body('password')
     .isString()
-    .isLength({ min: 12, max: 128 })
-    .withMessage('Password must be 12-128 characters'),
+    .isLength({ min: 4, max: 128 })
+    .withMessage('Password must be 4-128 characters'),
 ];
 
 router.post(
